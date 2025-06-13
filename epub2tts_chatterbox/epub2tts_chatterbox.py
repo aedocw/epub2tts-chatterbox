@@ -300,7 +300,10 @@ def process_large_text(line):
 
 def chatterbox_read(paragraph, sample, filenames, model):
     for i, sent in enumerate(paragraph, start=1):
-        wav = model.generate(sent, audio_prompt_path=sample)
+        if sample == "none":
+            wav = model.generate(sent)
+        else:
+            wav = model.generate(sent, audio_prompt_path=sample)
         ta.save(filenames[i], wav, model.sr)
 
 def read_book(book_contents, sample, notitles):
@@ -483,7 +486,11 @@ def main():
         exit()
 
     book_contents, book_title, book_author, chapter_titles = get_book(args.sourcefile)
-    files = read_book(book_contents, args.sample, args.paragraphpause, args.speed, args.notitles)
+    if args.sample is not None:
+        sample = args.sample
+    else:
+        sample = "none"
+    files = read_book(book_contents, args.sample, args.notitles)
     generate_metadata(files, book_author, book_title, chapter_titles)
     m4bfilename = make_m4b(files, args.sourcefile, args.speaker)
     add_cover(args.cover, m4bfilename)
