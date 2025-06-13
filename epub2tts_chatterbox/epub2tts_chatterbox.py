@@ -299,7 +299,7 @@ def process_large_text(line):
     return results
 
 def chatterbox_read(paragraph, sample, filenames, model):
-    for i, sent in enumerate(paragraph, start=1):
+    for i, sent in enumerate(paragraph):
         if sample == "none":
             wav = model.generate(sent)
         else:
@@ -344,8 +344,10 @@ def read_book(book_contents, sample, notitles):
                 else:
                     sentences = sent_tokenize(paragraph)
                     filenames = [
-                        "sntnc" + str(z + 1) + ".mp3" for z in range(len(sentences))
+                        "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                     ]
+                    print(filenames)
+                    exit()
                     chatterbox_read(paragraph, sample, filenames, model)
                     append_silence(filenames[-1], paragraphpause)
                     # combine sentences in paragraph
