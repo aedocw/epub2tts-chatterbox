@@ -49,6 +49,17 @@ def ensure_punkt():
     except LookupError:
         nltk.download("punkt_tab")
 
+def conditional_sentence_case(sent):
+    # Split the sentence into words
+    words = sent.split()
+
+    # Check if the first two words are uppercase
+    if len(words) >= 2 and words[0].isupper() and words[1].isupper():
+        # Convert the entire sentence to lowercase, then capitalize the first letter
+        sent = sent.lower().capitalize()
+
+    return sent
+
 def chap2text_epub(chap):
     blacklist = [
         "[document]",
@@ -300,11 +311,25 @@ def process_large_text(line):
 
 def chatterbox_read(sentences, sample, filenames, model):
     for i, sent in enumerate(sentences):
-        if sample == "none":
-            wav = model.generate(sent)
-        else:
-            wav = model.generate(sent, audio_prompt_path=sample)
-        ta.save(filenames[i], wav, model.sr)
+        clean_sent = conditional_sentence_case(sent.strip())
+        attempt = 0
+        max_attempts = 3
+        success = False
+        
+        while attempt < max_attempts and not success:
+            try:
+                if sample == "none":
+                    wav = model.generate(clean_sent)
+                else:
+                    wav = model.generate(clean_sent, audio_prompt_path=sample)
+                
+                ta.save(filenames[i], wav, model.sr)
+                success = True  # If no exception was raised, mark it as successful
+
+            except Exception as e:
+                attempt += 1
+                if attempt >= max_attempts:
+                    print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")        
 
 def read_book(book_contents, sample, notitles):
     # Automatically detect the best available device
