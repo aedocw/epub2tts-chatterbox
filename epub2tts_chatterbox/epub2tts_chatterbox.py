@@ -299,7 +299,6 @@ def process_large_text(line):
     return results
 
 def chatterbox_read(sentences, sample, filenames, model):
-    print(f"Got {filenames} and {sentences}")
     for i, sent in enumerate(sentences):
         if sample == "none":
             wav = model.generate(sent)
@@ -379,7 +378,7 @@ def generate_metadata(files, author, title, chapter_titles):
         file.write(f"ARTIST={author}\n")
         file.write(f"ALBUM={title}\n")
         file.write(f"TITLE={title}\n")
-        file.write("DESCRIPTION=Made with https://github.com/aedocw/epub2tts-chatterbox\n")
+        file.write("DESCRIPTION=Made with https://github.com/aedocw/epub2tts-kokoro\n")
         for file_name in files:
             duration = get_duration(file_name)
             file.write("[CHAPTER]\n")
@@ -395,11 +394,11 @@ def get_duration(file_path):
     duration_milliseconds = len(audio)
     return duration_milliseconds
 
-def make_m4b(files, sourcefile):
+def make_m4b(files, sourcefile, speaker):
     filelist = "filelist.txt"
     basefile = sourcefile.replace(".txt", "")
     outputm4a = f"{basefile}.m4a"
-    outputm4b = f"{basefile}.m4b"
+    outputm4b = f"{basefile} ({speaker.split('.wav')[0]}).m4b"
     with open(filelist, "w") as f:
         for filename in files:
             filename = filename.replace("'", "'\\''")
@@ -493,7 +492,7 @@ def main():
         sample = "none"
     files = read_book(book_contents, sample, args.notitles)
     generate_metadata(files, book_author, book_title, chapter_titles)
-    m4bfilename = make_m4b(files, args.sourcefile)
+    m4bfilename = make_m4b(files, args.sourcefile, sample)
     if args.cover is not None:
         add_cover(args.cover, m4bfilename)
     
