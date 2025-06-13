@@ -379,7 +379,7 @@ def generate_metadata(files, author, title, chapter_titles):
         file.write(f"ARTIST={author}\n")
         file.write(f"ALBUM={title}\n")
         file.write(f"TITLE={title}\n")
-        file.write("DESCRIPTION=Made with https://github.com/aedocw/epub2tts-kokoro\n")
+        file.write("DESCRIPTION=Made with https://github.com/aedocw/epub2tts-chatterbox\n")
         for file_name in files:
             duration = get_duration(file_name)
             file.write("[CHAPTER]\n")
