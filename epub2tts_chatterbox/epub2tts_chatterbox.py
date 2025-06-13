@@ -298,8 +298,8 @@ def process_large_text(line):
             
     return results
 
-def chatterbox_read(paragraph, sample, filenames, model):
-    for i, sent in enumerate(paragraph):
+def chatterbox_read(sentences, sample, filenames, model):
+    for i, sent in enumerate(sentences):
         if sample == "none":
             wav = model.generate(sent)
         else:
@@ -346,9 +346,7 @@ def read_book(book_contents, sample, notitles):
                     filenames = [
                         "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                     ]
-                    print(filenames)
-                    exit()
-                    chatterbox_read(paragraph, sample, filenames, model)
+                    chatterbox_read(sentences, sample, filenames, model)
                     append_silence(filenames[-1], paragraphpause)
                     # combine sentences in paragraph
                     sorted_files = sorted(filenames, key=sort_key)
