@@ -396,9 +396,10 @@ def get_duration(file_path):
 
 def make_m4b(files, sourcefile, speaker):
     filelist = "filelist.txt"
+    speaker_file = os.path.basename(speaker)
     basefile = sourcefile.replace(".txt", "")
     outputm4a = f"{basefile}.m4a"
-    outputm4b = f"{basefile} ({speaker.split('.wav')[0]}).m4b"
+    outputm4b = f"{basefile} ({speaker_file.split('.wav')[0]}).m4b"
     with open(filelist, "w") as f:
         for filename in files:
             filename = filename.replace("'", "'\\''")
