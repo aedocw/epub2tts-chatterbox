@@ -245,6 +245,10 @@ def check_for_file(filename):
             os.remove(filename)
 
 def append_silence(tempfile, duration=1200):
+    # if temppfile does not exist, return
+    if not os.path.isfile(tempfile):
+        print(f"File {tempfile} does not exist, skipping silence append.")
+        return
     audio = AudioSegment.from_file(tempfile)
     # Create a silence segment
     silence = AudioSegment.silent(duration)
