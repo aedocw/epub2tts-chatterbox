@@ -490,7 +490,7 @@ def main():
         sample = args.sample
     else:
         sample = "none"
-    files = read_book(book_contents, args.sample, args.notitles)
+    files = read_book(book_contents, sample, args.notitles)
     generate_metadata(files, book_author, book_title, chapter_titles)
     m4bfilename = make_m4b(files, args.sourcefile, args.speaker)
     add_cover(args.cover, m4bfilename)
