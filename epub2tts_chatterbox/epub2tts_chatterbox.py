@@ -299,6 +299,7 @@ def process_large_text(line):
     return results
 
 def chatterbox_read(sentences, sample, filenames, model):
+    print(f"Got {filenames} and {sentences}")
     for i, sent in enumerate(sentences):
         if sample == "none":
             wav = model.generate(sent)
@@ -350,8 +351,8 @@ def read_book(book_contents, sample, notitles):
                     append_silence(filenames[-1], paragraphpause)
                     # combine sentences in paragraph
                     sorted_files = sorted(filenames, key=sort_key)
-                    if os.path.exists("sntnc0.wav"):
-                        sorted_files.insert(0, "sntnc0.wav")
+                    #if os.path.exists("sntnc0.wav"):
+                    #    sorted_files.insert(0, "sntnc0.wav")
                     combined = AudioSegment.empty()
                     for file in sorted_files:
                         combined += AudioSegment.from_file(file)
@@ -394,11 +395,11 @@ def get_duration(file_path):
     duration_milliseconds = len(audio)
     return duration_milliseconds
 
-def make_m4b(files, sourcefile, speaker):
+def make_m4b(files, sourcefile):
     filelist = "filelist.txt"
     basefile = sourcefile.replace(".txt", "")
-    outputm4a = f"{basefile} ({speaker}).m4a"
-    outputm4b = f"{basefile} ({speaker}).m4b"
+    outputm4a = f"{basefile}.m4a"
+    outputm4b = f"{basefile}.m4b"
     with open(filelist, "w") as f:
         for filename in files:
             filename = filename.replace("'", "'\\''")
@@ -492,8 +493,9 @@ def main():
         sample = "none"
     files = read_book(book_contents, sample, args.notitles)
     generate_metadata(files, book_author, book_title, chapter_titles)
-    m4bfilename = make_m4b(files, args.sourcefile, args.speaker)
-    add_cover(args.cover, m4bfilename)
+    m4bfilename = make_m4b(files, args.sourcefile)
+    if args.cover is not None:
+        add_cover(args.cover, m4bfilename)
     
 if __name__ == "__main__":
     main()
