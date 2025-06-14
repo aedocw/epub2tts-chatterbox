@@ -282,6 +282,31 @@ def chatterbox_read(sentences, sample, filenames, model):
                 else:
                     print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")
 
+def fix_sentence_length(sentences):
+    fixed_sentences = []
+    skip_next = False
+    for i, sentence in enumerate(sentences):
+        if skip_next:
+            skip_next = False
+            continue
+        words = sentence.split()
+        if len(words) < 3:
+            if i < len(sentences) - 1:
+                # Combine with next sentence
+                next_sentence = sentences[i + 1]
+                combined_sentence = sentence + " " + next_sentence
+                fixed_sentences.append(combined_sentence)
+                skip_next = True  # Skip the next sentence as it's already combined
+            else:
+                # Last sentence, combine with previous sentence
+                if fixed_sentences:
+                    fixed_sentences[-1] += " " + sentence
+                else:
+                    fixed_sentences.append(sentence)
+        else:
+            fixed_sentences.append(sentence)
+    return fixed_sentences
+
 def read_book(book_contents, sample, notitles):
     # Automatically detect the best available device
     if torch.cuda.is_available():
@@ -319,6 +344,7 @@ def read_book(book_contents, sample, notitles):
                     print(f"{ptemp} exists, skipping to next paragraph")
                 else:
                     sentences = sent_tokenize(paragraph)
+                    sentences = fix_sentence_length(sentences)
                     filenames = [
                         "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                     ]
