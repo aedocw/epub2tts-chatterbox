@@ -26,7 +26,13 @@ from nltk.tokenize import sent_tokenize
 from PIL import Image
 from pydub import AudioSegment
 import zipfile
+import warnings
 
+# Suppress this specific warning from appearing in the output
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", category=UserWarning)  # Suppress UserWarning
+    # Place the deprecated code here
+    self.gen = func(*args, **kwds)
 
 namespaces = {
    "calibre":"http://calibre.kovidgoyal.net/2009/metadata",
