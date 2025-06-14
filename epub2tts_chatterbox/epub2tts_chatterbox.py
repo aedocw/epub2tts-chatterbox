@@ -259,70 +259,11 @@ def append_silence(tempfile, duration=1200):
     # Save the combined audio back to file
     combined.export(tempfile, format="flac")
 
-def break_long_sentence(sentence, max_length=200):
-    # Split sentence based on commas
-    comma_segments = sentence.split(',')
-    segments = []
-    current_segment = ""
-    for segment in comma_segments:
-        # Check if adding the next segment exceeds max_length
-        temp_segment = current_segment + ("," if current_segment else "") + segment
-        if len(temp_segment) > max_length:
-            # Add the current segment to the list and reset it
-            if current_segment:
-                segments.append(current_segment)
-            # Start a new segment with the current part
-            current_segment = segment.strip()
-        else:
-            # Continue building the current segment
-            current_segment = temp_segment.strip()
-    # Don't forget to add the last segment if it exists
-    if current_segment:
-        segments.append(current_segment)
-    return segments
-
-def process_large_text(line):
-    # Tokenize the text into sentences
-    sentences = sent_tokenize(line)
-    # Initialize a list to store processed sentences
-    results = []
-    
-    i = 0
-    while i < len(sentences):
-        sentence = sentences[i]
-        word_count = len(sentence.split())
-        
-        # Combine with the next sentence if this one has fewer than 8 words
-        if word_count < 8 and i + 1 < len(sentences):
-            # Combine the current and next sentence
-            sentence = sentence + ' ' + sentences[i + 1]
-            i += 1  # Skip the next sentence since it's already combined
-
-        if len(sentence) > 500:
-            # Break the long sentences into smaller parts using commas
-            results.extend(break_long_sentence(sentence, max_length=350))
-        else:
-            results.append(sentence)
-        
-        i += 1  # Move to the next sentence
-    
-    # Before returning, combine last elements if they are too short
-    if results and len(results[-1].split()) < 8:
-        if len(results) > 1:
-            # Combine the last two sentences if they are both short
-            results[-2] += ' ' + results[-1]
-            results.pop()
-            
-    return results
-
 def chatterbox_read(sentences, sample, filenames, model):
     for i, sent in enumerate(sentences):
         clean_sent = conditional_sentence_case(sent.strip())
-        attempt = 0
         max_attempts = 3
-        success = False
-        
-        while attempt < max_attempts and not success:
+        for attempt in range(1, max_attempts + 1):
             try:
                 if sample == "none":
                     wav = model.generate(clean_sent)
@@ -330,12 +271,16 @@ def chatterbox_read(sentences, sample, filenames, model):
                     wav = model.generate(clean_sent, audio_prompt_path=sample)
                 
                 ta.save(filenames[i], wav, model.sr)
-                success = True  # If no exception was raised, mark it as successful
+                # confirm the file was created
+                if not os.path.isfile(filenames[i]):
+                    raise FileNotFoundError(f"File {filenames[i]} was not created.")
+                break  # Success, exit retry loop
 
             except Exception as e:
-                attempt += 1
-                if attempt >= max_attempts:
-                    print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")        
+                if attempt < max_attempts:
+                    print(f"Attempt {attempt} failed for sentence '{clean_sent}': {e} -- Retrying...")
+                else:
+                    print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")
 
 def read_book(book_contents, sample, notitles):
     # Automatically detect the best available device
@@ -385,7 +330,14 @@ def read_book(book_contents, sample, notitles):
                     #    sorted_files.insert(0, "sntnc0.wav")
                     combined = AudioSegment.empty()
                     for file in sorted_files:
-                        combined += AudioSegment.from_file(file)
+                        try:
+                            combined += AudioSegment.from_file(file)
+                        except:
+                            print("FAILURE at sorted file combine")
+                            print(f"File: {file}")
+                            print(f"sorted files: {sorted_files}")
+                            print(f"Unsorted: {filenames}")
+                            sys.exit()
                     combined.export(ptemp, format="flac")
                     for file in sorted_files:
                         os.remove(file)
