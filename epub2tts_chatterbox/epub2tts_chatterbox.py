@@ -330,7 +330,7 @@ def read_book(book_contents, sample, notitles):
             print(f"{partname} exists, skipping to next chapter")
             segments.append(partname)
         else:
-            print(f"Chapter: {chapter['title']}\n")
+            print(f"Chapter ({i}/{len(book_contents)}): {chapter['title']}\n")
             print(f"Section name: \"{chapter['title']}\"")
             if chapter["title"] == "":
                 chapter["title"] = "blank"
