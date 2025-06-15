@@ -266,10 +266,13 @@ def chatterbox_read(sentences, sample, filenames, model):
         for attempt in range(1, max_attempts + 1):
             try:
                 if sample == "none":
+                    print(f"Generating audio for sentence: {clean_sent}")
                     wav = model.generate(clean_sent)
                 else:
+                    print(f"Generating audio for sentence: {clean_sent}")
                     wav = model.generate(clean_sent, audio_prompt_path=sample)
                 
+                print(f"Saving audio to {filenames[i]}")
                 ta.save(filenames[i], wav, model.sr)
                 # confirm the file was created
                 if not os.path.isfile(filenames[i]):
