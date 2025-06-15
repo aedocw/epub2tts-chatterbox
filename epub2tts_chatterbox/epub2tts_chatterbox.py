@@ -263,16 +263,17 @@ def chatterbox_read(sentences, sample, filenames, model):
     for i, sent in enumerate(sentences):
         clean_sent = conditional_sentence_case(sent.strip())
         max_attempts = 3
+        # This "try 3 times" loop is probably not needed, actual failure was from a torch recursive error that was fixed
         for attempt in range(1, max_attempts + 1):
             try:
                 if sample == "none":
-                    print(f"Generating audio for sentence: {clean_sent}")
+                    #print(f"Generating audio for sentence: {clean_sent}")
                     wav = model.generate(clean_sent)
                 else:
-                    print(f"Generating audio for sentence: {clean_sent}")
+                    #print(f"Generating audio for sentence: {clean_sent}")
                     wav = model.generate(clean_sent, audio_prompt_path=sample)
                 
-                print(f"Saving audio to {filenames[i]}")
+                #print(f"Saving audio to {filenames[i]}")
                 ta.save(filenames[i], wav, model.sr)
                 # confirm the file was created
                 if not os.path.isfile(filenames[i]):
@@ -347,7 +348,8 @@ def read_book(book_contents, sample, notitles):
                     print(f"{ptemp} exists, skipping to next paragraph")
                 else:
                     sentences = sent_tokenize(paragraph)
-                    sentences = fix_sentence_length(sentences)
+                    # This is probably not needed, commenting out for now
+                    # sentences = fix_sentence_length(sentences)
                     filenames = [
                         "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                     ]
@@ -359,6 +361,7 @@ def read_book(book_contents, sample, notitles):
                     #    sorted_files.insert(0, "sntnc0.wav")
                     combined = AudioSegment.empty()
                     for file in sorted_files:
+                        # try/except prob not needed, actual failure was from a torch recursive error that was fixed
                         try:
                             combined += AudioSegment.from_file(file)
                         except:
@@ -506,8 +509,7 @@ def main():
     files = read_book(book_contents, sample, args.notitles)
     generate_metadata(files, book_author, book_title, chapter_titles)
     m4bfilename = make_m4b(files, args.sourcefile, sample)
-    if args.cover is not None:
-        add_cover(args.cover, m4bfilename)
+    add_cover(args.cover, m4bfilename)
     
 if __name__ == "__main__":
     main()
