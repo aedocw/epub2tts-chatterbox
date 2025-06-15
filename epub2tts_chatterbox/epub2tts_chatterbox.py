@@ -340,9 +340,7 @@ def read_book(book_contents, sample, notitles):
                 chapter["title"] = "blank"
             if chapter["title"] != "Title" and notitles != True:
                 chapter['paragraphs'][0] = chapter['title'] + ". " + chapter['paragraphs'][0]
-            for pindex, paragraph in enumerate(
-                tqdm(chapter["paragraphs"], desc=f"Generating audio files: ",unit='pg')
-            ):
+            for pindex, paragraph in enumerate(chapter["paragraphs"]):
                 ptemp = f"pgraphs{pindex}.flac"
                 if os.path.isfile(ptemp):
                     print(f"{ptemp} exists, skipping to next paragraph")
