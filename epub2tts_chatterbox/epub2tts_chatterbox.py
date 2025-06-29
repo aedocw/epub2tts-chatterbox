@@ -88,6 +88,11 @@ def chap2text_epub(chap):
         if not any(char.isalpha() for char in a.text):
             a.extract()
 
+    # Always skip anything that starts with "<sup class=" and ends with "</sup>"
+    for sup in soup.findAll("sup"):
+        if sup.text.isdigit():
+            sup.extract()
+
     chapter_paragraphs = soup.find_all("p")
     if len(chapter_paragraphs) == 0:
         print(f"Could not find any paragraph tags <p> in \"{chapter_title_text}\". Trying with <div>.")
