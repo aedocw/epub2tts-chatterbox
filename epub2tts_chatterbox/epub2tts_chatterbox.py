@@ -54,12 +54,13 @@ def ensure_punkt():
 def conditional_sentence_case(sent):
     # Split the sentence into words
     words = sent.split()
-
-    # Check if the first two words are uppercase
-    if len(words) >= 2 and words[0].isupper() and words[1].isupper():
-        # Convert the entire sentence to lowercase, then capitalize the first letter
-        sent = sent.lower().capitalize()
-
+    length = len(words)
+    # Iterate through words to check for three consecutive uppercase words
+    for i in range(length - 2):
+        if words[i].isupper() and words[i+1].isupper() and words[i+2].isupper():
+            # Convert the entire sentence to lowercase and capitalize the first letter
+            sent = ' '.join(words).lower().capitalize()
+            break  # No need to continue checking once a match is found
     return sent
 
 def chap2text_epub(chap):
