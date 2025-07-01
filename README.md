@@ -1,4 +1,4 @@
-> epub2tts-chatterbox is a free and open source python app to easily create a full-featured audiobook from an epub or text file using realistic voice-cloning text-to-speech by [Chatterbox](https://github.com/resemble-ai/chatterbox). CUDA compatible GPU is required. (MIGHT work with Apple Silicon but that hasn't been tested yet)
+> epub2tts-chatterbox is a free and open source python app to easily create a full-featured audiobook from an epub or text file using realistic voice-cloning text-to-speech by [Chatterbox](https://github.com/resemble-ai/chatterbox). CUDA compatible GPU is required, or Apple silicone.
 
 ## 🚀 Features
 
@@ -68,14 +68,13 @@ Required Python version is 3.11.
 *NOTE:* If you want to specify where NLTK tokenizer will be stored (about 50mb), use an environment variable: `export NLTK_DATA="your/path/to/nltk_data"`
 
 <details>
-<summary>MAC INSTALLATION *[WIP]*</summary>
+<summary>MAC INSTALLATION</summary>
 
-NOTE: This is not tested on Mac yet, this will probably not work!
 This installation requires Python < 3.12 and [Homebrew](https://brew.sh/) (I use homebrew to install espeak, [pyenv](https://stackoverflow.com/questions/36968425/how-can-i-install-multiple-versions-of-python-on-latest-os-x-and-use-them-in-par) and ffmpeg).
 
 ```
 #install dependencies
-brew install espeak pyenv ffmpeg
+brew install mecab espeak pyenv ffmpeg
 #install epub2tts-chatterbox
 git clone https://github.com/aedocw/epub2tts-chatterbox
 cd epub2tts-chatterbox
