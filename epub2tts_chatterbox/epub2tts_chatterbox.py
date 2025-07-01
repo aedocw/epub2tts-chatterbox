@@ -63,7 +63,18 @@ def conditional_sentence_case(sent):
             break  # No need to continue checking once a match is found
     return sent
 
-def chap2text_epub(chap):
+def chap2text_epub(chap, item_id=None, toc=None):
+    """
+    Extract chapter title and paragraphs from an EPUB chapter.
+    
+    Args:
+        chap: The chapter content (HTML).
+        item_id: The ID of the item in the EPUB spine (for fallback naming).
+        toc: The EPUB's table of contents (for fallback title extraction).
+    
+    Returns:
+        tuple: (chapter_title_text, paragraphs)
+    """
     blacklist = [
         "[document]",
         "noscript",
@@ -77,31 +88,59 @@ def chap2text_epub(chap):
     paragraphs = []
     soup = BeautifulSoup(chap, "html.parser")
 
-    # Extract chapter title (assuming it's in an <h1> tag)
-    chapter_title = soup.find("h1")
-    if chapter_title:
-        chapter_title_text = chapter_title.text.strip()
-    else:
-        chapter_title_text = None
+    # Step 1: Try to find chapter title in heading tags (<h1>, <h2>, <h3>)
+    heading_tags = ['h1', 'h2', 'h3']
+    chapter_title_text = None
+    for tag in heading_tags:
+        heading = soup.find(tag)
+        if heading and heading.text.strip():
+            chapter_title_text = heading.text.strip()
+            print(f"Found title in <{tag}>: '{chapter_title_text}'")
+            break
 
-    # Always skip reading links that are just a number (footnotes)
+    # Step 2: If no heading found, try elements with common class names
+    if not chapter_title_text:
+        common_classes = ['chapter', 'chapter-title', 'title', 'heading']
+        for class_name in common_classes:
+            element = soup.find(class_=class_name)
+            if element and element.text.strip():
+                chapter_title_text = element.text.strip()
+                print(f"Found title in class '{class_name}': '{chapter_title_text}'")
+                break
+
+    # Step 3: Fallback to TOC if provided
+    if not chapter_title_text and toc and item_id:
+        for toc_item in toc:
+            if toc_item.href.split('#')[0] == item_id:
+                chapter_title_text = toc_item.title
+                print(f"Found title in TOC for item '{item_id}': '{chapter_title_text}'")
+                break
+
+    # Step 4: Fallback to item ID or generic name
+    if not chapter_title_text:
+        chapter_title_text = item_id.replace('.xhtml', '').replace('_', ' ').title() if item_id else None
+        print(f"No title found, using fallback: '{chapter_title_text}'")
+
+    # Remove footnotes (links with only numbers)
     for a in soup.findAll("a", href=True):
         if not any(char.isalpha() for char in a.text):
             a.extract()
 
-    # Always skip anything that starts with "<sup class=" and ends with "</sup>"
+    # Remove superscript numbers (e.g., footnote markers)
     for sup in soup.findAll("sup"):
         if sup.text.isdigit():
             sup.extract()
 
+    # Extract paragraphs
     chapter_paragraphs = soup.find_all("p")
-    if len(chapter_paragraphs) == 0:
-        print(f"Could not find any paragraph tags <p> in \"{chapter_title_text}\". Trying with <div>.")
+    if not chapter_paragraphs:
+        print(f"No <p> tags found in '{chapter_title_text or item_id}'. Trying <div>.")
         chapter_paragraphs = soup.find_all("div")
 
     for p in chapter_paragraphs:
         paragraph_text = "".join(p.strings).strip()
-        paragraphs.append(paragraph_text)
+        if paragraph_text:
+            paragraphs.append(paragraph_text)
 
     return chapter_title_text, paragraphs
 
@@ -145,22 +184,20 @@ def export(book, sourcefile):
         image.save(image_path)
         print(f"Cover image saved to {image_path}")
 
-    spine_ids = []
-    for spine_tuple in book.spine:
-        if spine_tuple[1] == 'yes': # if item in spine is linear
-            spine_ids.append(spine_tuple[0])
+    # Get the table of contents
+    toc = book.get_toc() if hasattr(book, 'get_toc') else []
 
-    items = {}
-    for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            items[item.get_id()] = item
+    spine_ids = [spine_tuple[0] for spine_tuple in book.spine if spine_tuple[1] == 'yes']
+    items = {item.get_id(): item for item in book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT}
 
     for id in spine_ids:
-        item = items.get(id, None)
+        item = items.get(id)
         if item is None:
             continue
-        chapter_title, chapter_paragraphs = chap2text_epub(item.get_content())
+        # Pass item_id and toc to chap2text_epub
+        chapter_title, chapter_paragraphs = chap2text_epub(item.get_content(), item_id=id, toc=toc)
         book_contents.append({"title": chapter_title, "paragraphs": chapter_paragraphs})
+
     outfile = sourcefile.replace(".epub", ".txt")
     check_for_file(outfile)
     print(f"Exporting {sourcefile} to {outfile}")
@@ -170,23 +207,23 @@ def export(book, sourcefile):
     with open(outfile, "w", encoding='utf-8') as file:
         file.write(f"Title: {booktitle}\n")
         file.write(f"Author: {author}\n\n")
-
         file.write(f"# Title\n")
         file.write(f"{booktitle}, by {author}\n\n")
         for i, chapter in enumerate(book_contents, start=1):
-            if chapter["paragraphs"] == [] or chapter["paragraphs"] == ['']:
+            if not chapter["paragraphs"] or chapter["paragraphs"] == ['']:
                 continue
             else:
-                if chapter["title"] == None:
-                    file.write(f"# Part {i}\n")
-                else:
-                    file.write(f"# {chapter['title']}\n\n")
+                # Use chapter title if available, otherwise fallback to "Part {i}"
+                title = chapter["title"] if chapter["title"] else f"Part {i}"
+                file.write(f"# {title}\n\n")
                 for paragraph in chapter["paragraphs"]:
                     clean = re.sub(r'[\s\n]+', ' ', paragraph)
                     clean = re.sub(r'[“”]', '"', clean)  # Curly double quotes to standard double quotes
                     clean = re.sub(r'[‘’]', "'", clean)  # Curly single quotes to standard single quotes
                     clean = re.sub(r'--', ', ', clean)
                     file.write(f"{clean}\n\n")
+
+    return book_contents
 
 def get_book(sourcefile):
     book_contents = []
