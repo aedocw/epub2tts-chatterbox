@@ -221,6 +221,7 @@ def export(book, sourcefile):
                     clean = re.sub(r'[“”]', '"', clean)  # Curly double quotes to standard double quotes
                     clean = re.sub(r'[‘’]', "'", clean)  # Curly single quotes to standard single quotes
                     clean = re.sub(r'--', ', ', clean)
+                    clean = re.sub(r'—', ', ', clean)
                     file.write(f"{clean}\n\n")
 
     return book_contents
