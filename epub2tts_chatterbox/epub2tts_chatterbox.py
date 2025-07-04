@@ -302,7 +302,7 @@ def append_silence(tempfile, duration=1200):
     # Save the combined audio back to file
     combined.export(tempfile, format="flac")
 
-def chatterbox_read(sentences, sample, filenames, model):
+def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight):
     for i, sent in enumerate(sentences):
         clean_sent = conditional_sentence_case(sent.strip())
         max_attempts = 3
@@ -314,7 +314,8 @@ def chatterbox_read(sentences, sample, filenames, model):
                     wav = model.generate(clean_sent)
                 else:
                     #print(f"Generating audio for sentence: {clean_sent}")
-                    wav = model.generate(clean_sent, audio_prompt_path=sample)
+                    # generate(self, text, repetition_penalty=1.2, min_p=0.05, top_p=1.0, audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5, temperature=0.8)
+                    wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
                 
                 #print(f"Saving audio to {filenames[i]}")
                 ta.save(filenames[i], wav, model.sr)
@@ -354,7 +355,7 @@ def fix_sentence_length(sentences):
             fixed_sentences.append(sentence)
     return fixed_sentences
 
-def read_book(book_contents, sample, notitles):
+def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
     # Automatically detect the best available device
     if torch.cuda.is_available():
         device = "cuda"
@@ -394,7 +395,7 @@ def read_book(book_contents, sample, notitles):
                     filenames = [
                         "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                     ]
-                    chatterbox_read(sentences, sample, filenames, model)
+                    chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight)
                     append_silence(filenames[-1], paragraphpause)
                     # combine sentences in paragraph
                     sorted_files = sorted(filenames, key=sort_key)
@@ -530,6 +531,18 @@ def main():
         action="store_true",
         help="Do not read chapter titles"
     )
+    parser.add_argument(
+        "--exaggeration",
+        type=float,
+        default=0.5,
+        help="Exaggeration factor for voice cloning (default: 0.5)",
+    )
+    parser.add_argument(
+        "--cfg_weight",
+        type=float,
+        default=0.5,
+        help="CFG weight for voice cloning (default: 0.5)",
+    )
 
     args = parser.parse_args()
     print(args)
@@ -547,7 +560,7 @@ def main():
         sample = args.sample
     else:
         sample = "none"
-    files = read_book(book_contents, sample, args.notitles)
+    files = read_book(book_contents, sample, args.notitles, args.exaggeration, args.cfg_weight)
     generate_metadata(files, book_author, book_title, chapter_titles)
     m4bfilename = make_m4b(files, args.sourcefile, sample)
     add_cover(args.cover, m4bfilename)
