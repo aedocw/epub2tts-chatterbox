@@ -534,14 +534,14 @@ def main():
     parser.add_argument(
         "--exaggeration",
         type=float,
-        default=0.5,
-        help="Exaggeration factor for voice cloning (default: 0.5)",
+        default=0.7,
+        help="Exaggeration factor for voice cloning (default: 0.7)",
     )
     parser.add_argument(
         "--cfg_weight",
         type=float,
-        default=0.5,
-        help="CFG weight for voice cloning (default: 0.5)",
+        default=0.4,
+        help="CFG weight for voice cloning (default: 0.4)",
     )
 
     args = parser.parse_args()
