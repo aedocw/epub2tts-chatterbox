@@ -118,7 +118,7 @@ Running epub2tts in WSL2 with Ubuntu 22 is the easiest approach, but these steps
 7. Decide where you want your epub2tts project to live, documents is a common place. Once you've found a directory you're happy with, clone the project with `git clone https://github.com/aedocw/epub2tts` and cd epub2tts so you're now in your working directory.
 8. There are probably a few different ways you can go here, I personally opted for a venv to keep everything organized. Create a venv with the command `python -m venv .venv`
 9. Activate the venv, on windows the command is slightly different as you issue `.venv\scripts\activate`
-10. Install epub2tts along with the requirements with the commands `pip install .`
+10. Install epub2tts-chatterbox along with the requirements with the commands `pip install .`
 
 11. If all goes well, you should be able to call epub2tts from within your venv and update it from this directory going forward. To update, use `git pull` and then `pip install . --upgrade`
 
