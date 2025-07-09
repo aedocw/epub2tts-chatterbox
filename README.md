@@ -123,12 +123,12 @@ Running epub2tts in WSL2 with Ubuntu 22 is the easiest approach, but these steps
 11. If all goes well, you should be able to call epub2tts from within your venv and update it from this directory going forward. To update, use `git pull` and then `pip install . --upgrade`
 
 Using GPU:
-1. For checkig if do you use GPU run '.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"'
-2. If you get false you need to install compatibile torch version for your drivers (you can check it with 'nvidia-smi'):
-  - '.\.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio'
-  - '.\.venv\Scripts\python.exe -m pip install --no-cache-dir --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128'
-  - Do first step again for checking results.
-3. If you are getting torchaudio version error on running app you need to change it in 'METADATA' file in '.venv\Lib\site-packages\chatterbox_tts-0.1.2.dist-info'
+1. For checkig if do you use GPU run `.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"`
+2. If you get false you need to install compatibile torch version for your drivers (you can check it with `nvidia-smi`):
+  - `.\.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio`
+  - `.\.venv\Scripts\python.exe -m pip install --no-cache-dir --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128`
+  - Do the first step again for checking results.
+3. If you are getting torchaudio version error on running app you need to change it in `METADATA` file in `.venv\Lib\site-packages\chatterbox_tts-0.1.2.dist-info`
 
 </details>
 
