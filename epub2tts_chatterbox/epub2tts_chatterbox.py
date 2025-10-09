@@ -331,30 +331,78 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
                 else:
                     print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")
 
-def fix_sentence_length(sentences):
-    fixed_sentences = []
-    skip_next = False
-    for i, sentence in enumerate(sentences):
-        if skip_next:
-            skip_next = False
-            continue
-        words = sentence.split()
-        if len(words) < 3:
-            if i < len(sentences) - 1:
-                # Combine with next sentence
-                next_sentence = sentences[i + 1]
-                combined_sentence = sentence + " " + next_sentence
-                fixed_sentences.append(combined_sentence)
-                skip_next = True  # Skip the next sentence as it's already combined
+def combine_short_paragraphs(paragraphs, min_words=6):
+    """
+    Combine paragraphs that consist of a single sentence <min_words with next paragraph.
+    """
+    if not paragraphs:
+        return []
+
+    result = []
+    i = 0
+
+    while i < len(paragraphs):
+        paragraph = paragraphs[i]
+
+        # Check if this is a single short sentence
+        sentences = sent_tokenize(paragraph)
+        if len(sentences) == 1 and len(paragraph.split()) < min_words:
+            # Combine with next paragraph if available
+            if i + 1 < len(paragraphs):
+                combined = paragraph + " " + paragraphs[i + 1]
+                result.append(combined)
+                i += 2  # Skip next paragraph
             else:
-                # Last sentence, combine with previous sentence
-                if fixed_sentences:
-                    fixed_sentences[-1] += " " + sentence
-                else:
-                    fixed_sentences.append(sentence)
+                # Last paragraph, just add it (will be merged later in sentence processing)
+                result.append(paragraph)
+                i += 1
         else:
-            fixed_sentences.append(sentence)
-    return fixed_sentences
+            result.append(paragraph)
+            i += 1
+
+    return result
+
+def combine_short_sentences(sentences, min_words=6, keep_threshold=8):
+    """
+    Combine short sentences within a paragraph.
+    - Sentences with ≥keep_threshold words are left alone
+    - Shorter sentences are combined to reach min_words
+    """
+    if not sentences:
+        return []
+
+    result = []
+    current_chunk = ""
+
+    for i, sentence in enumerate(sentences):
+        word_count = len(sentence.split())
+
+        # If we have no current chunk, start one
+        if not current_chunk:
+            current_chunk = sentence
+            # If this sentence is long enough and it's not the last, emit it
+            if word_count >= keep_threshold and i < len(sentences) - 1:
+                result.append(current_chunk)
+                current_chunk = ""
+        else:
+            # Add to current chunk
+            current_chunk += " " + sentence
+
+        # Check if current chunk is ready to emit
+        chunk_words = len(current_chunk.split())
+        if chunk_words >= keep_threshold or (chunk_words >= min_words and i < len(sentences) - 1):
+            result.append(current_chunk)
+            current_chunk = ""
+
+    # Handle remaining chunk
+    if current_chunk:
+        if result and len(current_chunk.split()) < min_words:
+            # Merge with previous
+            result[-1] += " " + current_chunk
+        else:
+            result.append(current_chunk)
+
+    return result
 
 def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
     # Automatically detect the best available device
@@ -385,14 +433,18 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
                 chapter["title"] = "blank"
             if chapter["title"] != "Title" and notitles != True:
                 chapter['paragraphs'][0] = chapter['title'] + ". " + chapter['paragraphs'][0]
-            for pindex, paragraph in enumerate(chapter["paragraphs"]):
+
+            # Combine short paragraphs first
+            combined_paragraphs = combine_short_paragraphs(chapter["paragraphs"])
+
+            for pindex, paragraph in enumerate(combined_paragraphs):
                 ptemp = f"pgraphs{pindex}.flac"
                 if os.path.isfile(ptemp):
                     print(f"{ptemp} exists, skipping to next paragraph")
                 else:
                     sentences = sent_tokenize(paragraph)
-                    # This is probably not needed, commenting out for now
-                    # sentences = fix_sentence_length(sentences)
+                    # Combine short sentences within the paragraph
+                    sentences = combine_short_sentences(sentences)
                     filenames = [
                         "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                     ]
