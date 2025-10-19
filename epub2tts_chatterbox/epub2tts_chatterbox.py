@@ -5,6 +5,7 @@ import sys
 if sys.platform == 'darwin':
     os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 import argparse
+import time
 import numpy as np
 import re
 import soundfile
@@ -62,6 +63,19 @@ def conditional_sentence_case(sent):
             sent = ' '.join(words).lower().capitalize()
             break  # No need to continue checking once a match is found
     return sent
+
+def format_time_adaptive(seconds):
+    """Format time in adaptive format, showing only relevant units."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}m {secs}s"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
 
 def chap2text_epub(chap, item_id=None, toc=None):
     """
@@ -416,6 +430,11 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
     print(f"Attempting to use device: {device}")
     model = ChatterboxTTS.from_pretrained(device=device)
 
+    # Initialize timing and progress tracking
+    start_time = time.time()
+    total_chars = sum(len(''.join(chapter['paragraphs'])) for chapter in book_contents)
+    processed_chars = 0
+
     segments = []
     for i, chapter in enumerate(book_contents, start=1):
         paragraphpause = 600  # default pause between paragraphs in ms
@@ -426,8 +445,24 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
         if os.path.isfile(partname):
             print(f"{partname} exists, skipping to next chapter")
             segments.append(partname)
+            # Track characters even for skipped chapters
+            processed_chars += len(''.join(chapter['paragraphs']))
         else:
-            print(f"Chapter ({i}/{len(book_contents)}): {chapter['title']}\n")
+            # Calculate timing info before processing this chapter
+            elapsed_time = time.time() - start_time
+            elapsed_str = format_time_adaptive(elapsed_time)
+
+            # Calculate ETA based on text processed
+            if processed_chars > 0:
+                time_per_char = elapsed_time / processed_chars
+                remaining_chars = total_chars - processed_chars
+                eta_seconds = remaining_chars * time_per_char
+                eta_str = format_time_adaptive(eta_seconds)
+                timing_info = f" | Elapsed: {elapsed_str} | ETA: {eta_str}"
+            else:
+                timing_info = f" | Elapsed: {elapsed_str}"
+
+            print(f"Chapter ({i}/{len(book_contents)}): {chapter['title']}{timing_info}\n")
             print(f"Section name: \"{chapter['title']}\"")
             if chapter["title"] == "":
                 chapter["title"] = "blank"
@@ -478,6 +513,8 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
             for file in files:
                 os.remove(file)
             segments.append(partname)
+            # Track processed characters for this chapter
+            processed_chars += len(''.join(chapter['paragraphs']))
     return segments
 
 def generate_metadata(files, author, title, chapter_titles):
