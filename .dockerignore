@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.cache/
+cache/
+work/
+dist/
+build/
+*.egg-info/
+*.whl
