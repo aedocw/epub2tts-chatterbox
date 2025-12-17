@@ -141,6 +141,23 @@ To get started:
 
 </details>
 
+## Scripts
+
+<details>
+<summary>Flac2Mp3</summary>
+
+If you have a collection of .flac files that you wish to combine for a single input file into the `--sample` argument a utility script is provided.
+
+To get started:
+
+1. Place all `.flac` files in [/scripts/input_flac](/scripts/input_flac/)
+2. Navigate to the scripts directory with `cd scripts` from the project home
+3. Run the conversion script with `python flac2mp3.py`
+4. Checkout your stitched together `.wav` file in VLC Media Player (or similar) plays as intended
+5. Move the output `sample.wav` to the docker volume directory or where you wish to reference it from
+
+</details>
+
 ## Updating
 
 <details>
