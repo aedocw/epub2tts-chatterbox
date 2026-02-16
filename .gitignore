@@ -26,3 +26,12 @@ pip-log.txt
 .tox
 
 .python-version
+
+# Docker volume
+work
+# Tokenizer cache
+cache
+# Input data for scripts
+scripts/input_flac/
+# Flac temp file for script conversion
+flac_list.txt

@@ -1,0 +1,13 @@
+services:
+  epub2tts:
+    build: .
+    image: epub2tts-chatterbox:local
+    # Requires NVIDIA Container Toolkit (Linux) or Docker Desktop + WSL2 GPU support (Windows).
+    gpus: all
+    environment:
+      # Optional per README: where to store NLTK tokenizer data :contentReference[oaicite:2]{index=2}
+      NLTK_DATA: /cache/nltk_data
+    volumes:
+      - ./work:/work
+      - ./cache:/cache
+    working_dir: /work
