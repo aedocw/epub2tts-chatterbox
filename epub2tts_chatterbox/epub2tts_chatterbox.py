@@ -69,7 +69,6 @@ def get_book(sourcefile):
     book_contents = []
     book_title = sourcefile
     book_author = "Unknown"
-    chapter_titles = []
 
     with open(sourcefile, "r", encoding="utf-8") as file:
         current_chapter = {"title": "blank", "paragraphs": []}
@@ -95,13 +94,10 @@ def get_book(sourcefile):
                 chapter_title = line[1:].strip()
                 if any(c.isalnum() for c in chapter_title):
                     current_chapter["title"] = chapter_title
-                    chapter_titles.append(current_chapter["title"])
                 else:
                     current_chapter["title"] = "blank"
-                    chapter_titles.append("blank")
             elif line:
                 if not initialized_first_chapter:
-                    chapter_titles.append("blank")
                     initialized_first_chapter = True
                 if any(char.isalnum() for char in line):
                     sentences = sent_tokenize(line)
@@ -112,6 +108,13 @@ def get_book(sourcefile):
         # Append the last chapter if it contains any paragraphs.
         if current_chapter["paragraphs"]:
             book_contents.append(current_chapter)
+
+    # Derive titles from the chapters themselves so the two lists cannot drift.
+    # read_book() writes one audio part per entry in book_contents, and
+    # generate_metadata() labels those parts by position in chapter_titles, so a
+    # heading with no content under it (common after deleting front matter) must
+    # not contribute a title.
+    chapter_titles = [chapter["title"] for chapter in book_contents]
 
     return book_contents, book_title, book_author, chapter_titles
 
