@@ -168,6 +168,15 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
                 else:
                     print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")
 
+        # The MPS allocator keeps freed blocks cached, and over a full book that
+        # cache grows without bound -- measured at 32 GB after a few dozen
+        # sentences, enough for the kernel to kill the process. It is invisible in
+        # RSS (which stays near 3 GB) because the pages get compressed and swapped,
+        # so releasing it here is the only thing that keeps the footprint flat.
+        # Measured at ~56 ms with no net cost: less swap thrashing pays for it.
+        if str(getattr(model, "device", "")) == "mps":
+            torch.mps.empty_cache()
+
         if progress_bar is not None:
             progress_bar.update(1)
 
