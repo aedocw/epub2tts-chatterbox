@@ -166,7 +166,13 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
                 if attempt < max_attempts:
                     print(f"Attempt {attempt} failed for sentence '{clean_sent}': {e} -- Retrying...")
                 else:
-                    print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")
+                    # Giving up quietly left no audio file behind, and the caller then
+                    # exited with status 0 -- a failed run looked like a successful one.
+                    raise RuntimeError(
+                        f"Failed to process sentence '{clean_sent}' after {max_attempts} "
+                        f"attempts: {e}. Completed chapters and paragraphs have been kept, "
+                        f"so re-running will resume."
+                    ) from e
 
         if progress_bar is not None:
             progress_bar.update(1)
@@ -322,11 +328,13 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
                             try:
                                 combined += AudioSegment.from_file(file)
                             except Exception as e:
-                                print("FAILURE at sorted file combine")
-                                print(f"File: {file}")
-                                print(f"sorted files: {sorted_files}")
-                                print(f"Unsorted: {filenames}")
-                                sys.exit()
+                                # sys.exit() here reported status 0, so a crashed run
+                                # was indistinguishable from a completed one.
+                                raise RuntimeError(
+                                    f"Could not combine sentence audio for this paragraph: "
+                                    f"{file} could not be read ({e}). Completed chapters and "
+                                    f"paragraphs have been kept, so re-running will resume."
+                                ) from e
                         combined.export(ptemp, format="flac")
                         for file in sorted_files:
                             os.remove(file)
