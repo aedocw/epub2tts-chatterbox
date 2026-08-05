@@ -22,6 +22,33 @@
 1. `epub2tts-chatterbox mybook.epub`
 2. **edit mybook.txt**, replacing `# Part 1` etc with desired chapter names, and removing front matter like table of contents and anything else you do not want read. **Note:** First two lines can be Title: and Author: to use that in audiobook metadata.
 
+## THEN - check the text before converting:
+
+`epub2tts-chatterbox mybook.txt --check`
+
+Reports the structure and flags what tends to go wrong, without converting anything:
+
+```
+title    : My Book
+author   : Jane Doe
+chapters : 40
+words    : 63,242
+chunks   : 3,329  (largest 82 words)
+estimate : 2.9 h
+
+OK -- no problems found.
+```
+
+It flags chunks over 100 words (these usually fail partway through a run), duplicate
+chapter titles, titles that are not human readable such as `B31249 01` or a bare `1`,
+sections that look like an index or table of contents, and a missing `Title:` or
+`Author:` line. Exits non-zero when something needs attention, so it can gate the
+conversion:
+
+```
+epub2tts-chatterbox mybook.txt --check && epub2tts-chatterbox mybook.txt --cover mybook.png --sample voice.wav
+```
+
 ## Read text to audiobook:
 
 * `epub2tts-chatterbox mybook.txt --cover mybook.png --sample <speaker sample>`
@@ -33,6 +60,7 @@
 * `--sample SampleAudioFile` - Speaker sample to use (example: george.wav)
 * `--cover image.[jpg|png]` - Image to use for cover
 * `--notitles` - Do not read chapter titles when creating audiobook
+* `--check` - Inspect the text file and report problems without converting anything
 
 ## Deactivate virtual environment
 `deactivate`
