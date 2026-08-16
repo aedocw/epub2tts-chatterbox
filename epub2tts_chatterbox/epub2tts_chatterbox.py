@@ -154,7 +154,8 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
                     if sample == "none":
                         wav = model.generate(clean_sent)
                     else:
-                        wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
+                        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                            wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
 
                 ta.save(filenames[i], wav, model.sr)
                 # confirm the file was created
@@ -254,6 +255,10 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
         device = "cpu"
     print(f"Attempting to use device: {device}")
     model = ChatterboxTTS.from_pretrained(device=device)
+
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
 
     # Initialize timing and progress tracking
     start_time = time.time()
