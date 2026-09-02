@@ -105,6 +105,29 @@ pip install .
 </details>
 
 <details>
+<summary>Docker INSTALLATION</summary>
+
+Build the image from the provided Dockerfile, then run with GPU passthrough:
+
+```
+sudo docker build -t epub2tts-chatterbox:local .
+
+sudo docker run -it \
+  --name epub2tts-chatterbox \
+  --gpus all \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  -e HF_HOME=/root/.cache/huggingface \
+  -v /mnt/dm5/_ebook:/data \
+  -v /mnt/models/epub2tts:/root/.cache/huggingface \
+  epub2tts-chatterbox:local
+```
+
+</details>
+
+Note that from this point usage is same as in linux section.
+
+<details>
 <summary>WINDOWS INSTALLATION</summary>
 
 Running epub2tts-chatterbox in WSL2 with Ubuntu 22 is the easiest approach, but these steps should work for running directly in windows.
