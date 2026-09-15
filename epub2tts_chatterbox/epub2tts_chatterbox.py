@@ -424,7 +424,7 @@ def get_duration(file_path):
 def make_m4b(files, sourcefile, speaker):
     filelist = "filelist.txt"
     speaker_file = os.path.basename(speaker)
-    basefile = sourcefile.replace(".txt", "")
+    basefile = os.path.splitext(sourcefile)[0]
     outputm4a = f"{basefile}.m4a"
     speaker_name = os.path.splitext(speaker_file)[0]
     outputm4b = f"{basefile} ({speaker_name}).m4b"
@@ -448,7 +448,12 @@ def make_m4b(files, sourcefile, speaker):
         "-2",
         outputm4a,
     ]
-    subprocess.run(ffmpeg_command)
+    result = subprocess.run(ffmpeg_command)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg failed to combine the chapter files (exit {result.returncode}). "
+            f"The per-chapter files have been kept, so re-running will resume."
+        )
     ffmpeg_command = [
         "ffmpeg",
         "-i",
@@ -461,10 +466,17 @@ def make_m4b(files, sourcefile, speaker):
         "aac",
         outputm4b,
     ]
-    subprocess.run(ffmpeg_command)
-    os.remove(filelist)
-    os.remove("FFMETADATAFILE")
-    os.remove(outputm4a)
+    result = subprocess.run(ffmpeg_command)
+    if result.returncode != 0 or not os.path.isfile(outputm4b):
+        raise RuntimeError(
+            f"ffmpeg failed to write {outputm4b} (exit {result.returncode}). "
+            f"The per-chapter files have been kept, so re-running will resume."
+        )
+    # Only discard the source audio once the audiobook is known to exist -- these
+    # chapter files are the sole copy of hours of TTS output.
+    for scratch in (filelist, "FFMETADATAFILE", outputm4a):
+        if os.path.isfile(scratch):
+            os.remove(scratch)
     for f in files:
         os.remove(f)
     return outputm4b
