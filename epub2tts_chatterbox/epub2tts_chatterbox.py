@@ -24,6 +24,7 @@ from pydub import AudioSegment
 
 # Import EPUB export functions from the reusable library module
 from epub2tts_chatterbox.epub_export import export
+from epub2tts_chatterbox.check_book import check_book, report
 
 warnings.filterwarnings("ignore")
 
@@ -575,11 +576,21 @@ def main():
         default=None,
         help="Chapter naming method: auto (default, shows preview), toc, heading, class, or fallback",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Inspect the text file and report problems without converting anything. "
+             "Exits non-zero if the text needs attention.",
+    )
 
     args = parser.parse_args()
     print(args)
 
     ensure_punkt()
+
+    # Report on the text and stop, rather than spending hours on a bad one.
+    if args.check:
+        sys.exit(report(check_book(args.sourcefile)))
 
     #If we get an epub, export that to txt file, then exit
     if args.sourcefile.endswith(".epub"):
