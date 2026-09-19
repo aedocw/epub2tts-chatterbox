@@ -12,7 +12,7 @@ import subprocess
 import time
 import torch
 import warnings
-import torchaudio as ta
+import soundfile as sf
 from tqdm import tqdm
 from chatterbox.tts import ChatterboxTTS
 
@@ -209,7 +209,7 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
                     else:
                         wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
 
-                ta.save(filenames[i], wav, model.sr)
+                sf.write(filenames[i], wav.squeeze(0).cpu().numpy(), model.sr)
                 # confirm the file was created
                 if not os.path.isfile(filenames[i]):
                     raise FileNotFoundError(f"File {filenames[i]} was not created.")
