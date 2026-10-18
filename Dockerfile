@@ -25,4 +25,4 @@ RUN pip install --no-cache-dir .
 # Create a volume mount point for books/output
 VOLUME /data
 
-ENTRYPOINT ["/bin/bash"]
+ENTRYPOINT ["epub2tts-chatterbox"]
