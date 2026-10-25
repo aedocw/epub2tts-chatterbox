@@ -3,8 +3,8 @@
 > Reference document for building a Web frontend wrapper around `epub2tts-chatterbox`.
 > All info below is derived from the repo as of the clone in `/workspace/repos/epub2tts-chatterbox`.
 >
-> 👉 **For the target system design (Docker Compose stack, job lifecycle, FastAPI, progress,
-> dev-mode external GPU worker) see [`architecture.md`](./architecture.md).** This file is the
+> 👉 **For the target system design (single GPU container, job lifecycle, FastAPI, progress,
+> SSH-based dev flow) see [`architecture.md`](./architecture.md).** This file is the
 > repository reference; `architecture.md` is the design.
 
 ## 1. What this project does
@@ -19,12 +19,41 @@ Key features:
 - EPUB must be **DRM-free**
 - Requires **CUDA GPU** or **Apple Silicon (MPS)**; CPU falls back but is slow
 
+## 1a. Development container + SSH flow (working branch `container`)
+
+> Design shift: **one GPU container** holds everything. The agent develops **over SSH**
+> into that container — **no docker socket is ever given to the agent.** The server and
+> frontend are the same FastAPI app; each TTS job is a **subprocess** in its job dir.
+
+- **`Dockerfile-dev`** — copy of `Dockerfile` that additionally installs `openssh-server`,
+  enables root SSH login (`PermitRootLogin yes`, password `epub2tts` for dev, or mount your
+  `authorized_keys`), `EXPOSE 22`, and uses `ENTRYPOINT ["/app/entrypoint-dev.sh"]`.
+- **`entrypoint-dev.sh`** — starts `sshd`, creates `/data/{books,samples,jobs}`, keeps the
+  container alive with `tail -f /dev/null`. Nothing auto-runs; you SSH in and drive it.
+- **Build/run (manual):**
+  ```
+  sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
+  sudo docker run -d --name epub2tts-chatterbox-dev \
+    --gpus all \
+    -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    -e HF_HOME=/root/.cache/huggingface \
+    -v /mnt/models/epub2tts:/root/.cache/huggingface \
+    -v /mnt/dm5/_ebook:/data \
+    -p 2222:22 \
+    epub2tts-chatterbox-dev
+  # then:  ssh -p 2222 root@<host>   (password: epub2tts)
+  ```
+- **In-container dev:** code lives in `/app` (git checkout); `pip install -e .` for edits,
+  run the FastAPI server, tail logs — all over SSH.
+
 ## 2. Repository layout
 
 ```
 epub2tts-chatterbox/
 ├── README.md
 ├── Dockerfile                 # pytorch:2.1.2-cuda12.1 base, installs ffmpeg + espeak-ng
+├── Dockerfile-dev             # dev image: + openssh-server, ENTRYPOINT entrypoint-dev.sh
+├── entrypoint-dev.sh          # starts sshd, keeps container alive (SSH dev flow)
 ├── requirements.txt
 ├── setup.py                   # console script: epub2tts-chatterbox
 ├── epub2tts_chatterbox/

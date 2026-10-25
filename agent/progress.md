@@ -23,7 +23,13 @@
   - [x] Crash/restart resume via tool's built-in `partN.flac` checkpoints
   - [x] eBook browsing, FastAPI endpoints, compose sketch, reliability table all retained
 
-### Next (pending user direction)
-- [ ] Await confirmation of architecture / open decisions
-- [ ] When dev shared folder + GPU script provided → wire up live testing
-- [ ] (Not now) Implementation
+### Phase 4 — Single-container dev architecture + working branch `container`
+- [x] Architecture decision: collapse to **one GPU container**, agent develops over **SSH** (no docker socket to the agent). Server + frontend are the same FastAPI app; each TTS job runs as a **subprocess** in its job dir (keeps job lifetime decoupled from the web process; tool's `partN.flac` checkpoints give crash-resume).
+- [x] Created working branch `container` (from `frontend`)
+- [x] Added `Dockerfile-dev` — copy of `Dockerfile` + `openssh-server`, root SSH login, `EXPOSE 22`, `ENTRYPOINT ["/app/entrypoint-dev.sh"]`
+- [x] Added `entrypoint-dev.sh` — starts `sshd`, creates `/data/{books,samples,jobs}`, keeps container alive (`tail -f /dev/null`)
+- [x] Updated `outline.md` with the dev container + SSH flow
+
+### Next
+- [ ] User manually builds/runs the `container`-branch image, then agent SSHes in for live development
+- [ ] Implement the single FastAPI app (SPA + API + job supervision) inside the container
