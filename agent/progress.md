@@ -1,5 +1,70 @@
 # Progress Log
 
+## 2026-10-26 (later) — GPU-aware precision + production Dockerfile + README
+
+### 1. GPU-aware precision (universal across GPUs) — `epub2tts_chatterbox.py`
+- Problem: the 4060 Ti optimizations (bf16 autocast + TF32 + `cudnn.benchmark`) hurt
+  the GTX 1080 (Pascal: no native bf16, crippled fp16 → bf16 autocast is slower than
+  plain fp32). Made it GPU-aware instead of hardcoded, per compute capability.
+- `read_book()` now computes:
+  - `major, minor = torch.cuda.get_device_capability()`
+  - `use_bf16 = (device == "cuda" and major >= 8)`
+  - TF32 flags (`matmul.allow_tf32`, `cudnn.allow_tf32`) set **only** when `use_bf16`
+  - `cudnn.benchmark` **removed** (neutral-to-negative for variable-length TTS on any GPU)
+  - prints compute capability + bf16 decision for visibility
+- `chatterbox_read()` gains `use_bf16` param (default False); wraps `model.generate()`
+  in `torch.inference_mode()` **always**, plus `torch.autocast(bf16)` **iff** `use_bf16`
+  (else `contextlib.nullcontext()`). Fixed the double `generate()` risk (only one call
+  per sentence now). `inference_mode` kept for all GPUs (memory/overhead win).
+- Result: 4060 Ti → bf16 + TF32 (fast); 1080 → fp32 (its fastest native path). No config needed.
+- `py_compile` passes.
+- **Caveat (from review):** bf16 can slightly change Chatterbox output quality on
+  Ampere — worth an A/B listen on the 4060 Ti, not just a speed benchmark.
+
+### 2. Production `Dockerfile` (no SSH)
+- Rewritten: `COPY . /app/` (was `git clone` — would miss `web/`), installs ffmpeg/
+  espeak-ng, `pip install .`, `EXPOSE 8080`, `VOLUME /data`.
+- `ENTRYPOINT` now runs the **web UI** in the foreground:
+  `python3 -m uvicorn epub2tts_chatterbox.web:app --host 0.0.0.0 --port 8080`.
+- No `openssh-server` / sshd / key mounts (that stays in `Dockerfile-dev`).
+
+### 3. `requirements.txt` — added missing web deps
+- The web app imported fastapi/uvicorn/jinja2/pydantic but none were declared; a clean
+  `pip install .` (and thus the new production image) would fail at startup.
+- Added: `fastapi`, `uvicorn[standard]`, `jinja2`, `pydantic`.
+
+### 4. `README.md`
+- Docker section now matches the new image: `docker run -d -p 8080:8080 ...`, web UI at
+  `http://<host>:8080`, books in `/data/<folder>/*.epub`, samples in `/data/speaker/`.
+- Added "GPU precision is automatic" note (Ampere+ bf16/TF32, Pascal fp32).
+- Features list: added Web UI + GPU-aware precision. Added a 2026-10-26 release note.
+
+### 5. Agent docs
+- `outline.md`: updated `Dockerfile` layout comment, web deps in `requirements.txt` note,
+  and the pipeline internals to describe GPU-aware precision + removed `cudnn.benchmark`.
+
+### Smoke test on the 1080 (deployed via SSH) — PASSED
+- Deployed `epub2tts_chatterbox.py` to the **real import location**:
+  `/opt/conda/lib/python3.10/site-packages/epub2tts_chatterbox/` (the package is a **non-editable**
+  copy in site-packages, **not** `/app` — deploying to `/app` alone does nothing when run from
+  `/data/devel`). Cleared stale `__pycache__` after deploy.
+- Ran: `python -m epub2tts_chatterbox.epub2tts_chatterbox smoke_test.txt --sample /data/devel/sample3.wav`
+  from `/data/devel` (3-sentence test book).
+- Log confirms the GPU-aware decision on the **GTX 1080 (cc 6.1, Pascal)**:
+  - `GPU compute capability: 6.1`
+  - `Using bf16 autocast: False (inference_mode: always)`  → **fp32 path, as intended**
+- Output `smoke_test (sample3).m4b`: valid AAC, 24 kHz mono, ~17.8 s, chapter metadata intact.
+  No errors. Pascal fp32 path works end-to-end.
+
+### Next
+- [ ] A/B listen test on 4060 Ti (bf16 quality) — needs Ampere card; verify log shows `Using bf16 autocast: True`
+- [ ] Build the production image locally and smoke-test the web UI end-to-end (`docker build` + `docker run`)
+- [ ] Commit to `dev` (awaiting approval)
+
+> **Dev-environment note (added 2026-10-26):** to test a changed Python file, copy it to
+> `site-packages/epub2tts_chatterbox/` and clear `__pycache__` — `/app` is NOT on the import path
+> when the package is installed non-editably.
+
 ## 2026-07-17
 
 ### Phase 1 — Repo setup & investigation

@@ -6,6 +6,8 @@
 - [x] Automatic chapter break detection
 - [x] Embeds cover art if specified
 - [x] Resumes where it left off if interrupted
+- [x] Web UI (browse books, pick a sample, watch live progress) in the Docker image
+- [x] GPU-aware precision: bf16 on Ampere+ (4060 Ti), fp32 on Pascal (1080/2080)
 - [x] NOTE: epub file must be DRM-free
 
 
@@ -55,6 +57,7 @@ If you've found something new, please open an issue and be sure to include:
 <details>
 <summary>Release notes </summary>
 
+* 20261026: Added web UI (FastAPI) + job supervisor; GPU-aware precision (bf16 on Ampere+, fp32 on Pascal); production Dockerfile now serves the web UI on :8080
 * 20250224: Changed to read individual sentences rather than entire paragraph, for reading speed consistency
 * 20250221: Added `--notitles` option
 * 20250216: Initial release
@@ -107,12 +110,13 @@ pip install .
 <details>
 <summary>Docker INSTALLATION</summary>
 
-Build the image from the provided Dockerfile, then run with GPU passthrough:
+The production image ships the **web UI** (FastAPI + job supervisor). Build it
+from the repo root, then run with GPU passthrough and a `/data` bind mount:
 
 ```
 sudo docker build -t epub2tts-chatterbox:local .
 
-sudo docker run -it \
+sudo docker run -d \
   --name epub2tts-chatterbox \
   --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
@@ -120,12 +124,22 @@ sudo docker run -it \
   -e HF_HOME=/root/.cache/huggingface \
   -v /mnt/dm5/_ebook:/data \
   -v /mnt/models/epub2tts:/root/.cache/huggingface \
+  -p 8080:8080 \
   epub2tts-chatterbox:local
 ```
 
+Then open the web UI at `http://<host>:8080` to browse books, pick a speaker
+sample, create a job, and watch transcription progress live. (Books go in
+`/data/<folder>/*.epub`, speaker samples in `/data/speaker/`.)
+
 </details>
 
-Note that from this point usage is same as in linux section.
+> **GPU precision is automatic:** the app detects the GPU's compute capability
+> at startup. On **Ampere+ cards (e.g. 4060 Ti)** it enables bf16 autocast +
+> TF32 for a speedup; on **older cards (e.g. GTX 1080/2080)** it stays on the
+> native fp32 path (no bf16), which is their fastest option. No configuration
+> needed — it works on both. The CLI is still available inside the image if you
+> prefer it (`docker run -it --rm --entrypoint ... epub2tts-chatterbox:local`).
 
 <details>
 <summary>WINDOWS INSTALLATION</summary>

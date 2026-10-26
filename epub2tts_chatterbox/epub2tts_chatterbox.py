@@ -142,7 +142,7 @@ def append_silence(tempfile, duration=1200):
     # Save the combined audio back to file
     combined.export(tempfile, format="flac")
 
-def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, progress_bar=None):
+def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, progress_bar=None, use_bf16=False):
     for i, sent in enumerate(sentences):
         clean_sent = conditional_sentence_case(sent.strip())
         max_attempts = 3
@@ -151,10 +151,15 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
             try:
                 # Suppress Chatterbox's internal per-sentence tqdm sampling bars
                 with contextlib.redirect_stderr(io.StringIO()):
+                    # inference_mode is always a win (lower memory + no autograd overhead).
+                    # bf16 autocast is only enabled for Ampere+ GPUs (see read_book);
+                    # on Pascal (1080/2080) we stay on the native fp32 path.
+                    precision = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_bf16 else contextlib.nullcontext()
                     if sample == "none":
-                        wav = model.generate(clean_sent)
+                        with torch.inference_mode(), precision:
+                            wav = model.generate(clean_sent)
                     else:
-                        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                        with torch.inference_mode(), precision:
                             wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
 
                 ta.save(filenames[i], wav, model.sr)
@@ -256,9 +261,22 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
     print(f"Attempting to use device: {device}")
     model = ChatterboxTTS.from_pretrained(device=device)
 
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cudnn.benchmark = True
+    # GPU-aware precision. bf16 tensor-core speedups only exist on Ampere
+    # (compute capability >= 8.0, e.g. 4060 Ti). Pascal cards (1080/2080,
+    # cc 6.1/7.5) have no native bf16 and terrible fp16 — plain fp32 is their
+    # fastest path, so we skip both bf16 autocast and TF32 there.
+    #   - TF32 flags are ignored (no harm) on pre-Ampere, but only useful on Ampere+.
+    #   - cudnn.benchmark is left off: TTS input shapes vary per sentence, so
+    #     autotuning re-runs constantly and can be net-negative.
+    use_bf16 = False
+    if device == "cuda" and torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability()
+        use_bf16 = major >= 8
+        if use_bf16:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        print(f"GPU compute capability: {major}.{minor}")
+        print(f"Using bf16 autocast: {use_bf16} (inference_mode: always)")
 
     # Initialize timing and progress tracking
     start_time = time.time()
@@ -317,7 +335,7 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
                         filenames = [
                             "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                         ]
-                        chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, pbar)
+                        chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, pbar, use_bf16)
                         append_silence(filenames[-1], paragraphpause)
                         # combine sentences in paragraph
                         sorted_files = sorted(filenames, key=sort_key)

@@ -67,6 +67,14 @@ ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
 
 6. **Model cache:** Chatterbox model (~GBs) is cached at `/root/.cache/huggingface`. First TTS run will download if missing.
 
+7. **The package is installed NON-editable** into
+   `/opt/conda/lib/python3.10/site-packages/epub2tts_chatterbox/` — **not** from `/app`.
+   When you run from `/data/devel` (or anywhere outside `/app`), Python loads the
+   site-packages copy, **not** `/app/epub2tts_chatterbox/`. To test a changed Python file,
+   copy it to `site-packages/epub2tts_chatterbox/epub2tts_chatterbox.py` and clear the stale
+   `__pycache__/epub2tts_chatterbox.*` first. (Running with `cwd=/app` would use `/app`'s copy
+   because the script dir is prepended to `sys.path`, but that's fragile.)
+
 ## Git / Push
 
 - Remote: `git@github.com:rejuce/epub2tts-chatterbox.git` (SSH)

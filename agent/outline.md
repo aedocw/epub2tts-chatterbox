@@ -62,7 +62,8 @@ Key features:
 ```
 epub2tts-chatterbox/
 ├── README.md
-├── Dockerfile                 # pytorch:2.1.2-cuda12.1 base, installs ffmpeg + espeak-ng
+├── Dockerfile                 # PRODUCTION: pytorch:2.1.2-cuda12.1 base, COPY local src,
+│                              #   ENTRYPOINT runs the web UI (uvicorn) on :8080, no SSH
 ├── Dockerfile-dev             # dev image: + openssh-server, ENTRYPOINT entrypoint-dev.sh
 ├── entrypoint-dev.sh          # starts sshd, keeps container alive (SSH dev flow)
 ├── requirements.txt
@@ -85,7 +86,7 @@ epub2tts-chatterbox/
 ## 3. Dependencies & environment
 
 - **Python 3.12** required (README says 3.12; Mac section oddly says <3.12 — use 3.12/3.11)
-- `requirements.txt`: beautifulsoup4, ebooklib, **chatterbox-tts**, lxml, mutagen, nltk, numpy, pillow, pydub, setuptools, soundfile, tqdm
+- `requirements.txt`: beautifulsoup4, ebooklib, **chatterbox-tts**, lxml, mutagen, nltk, numpy, pillow, pydub, setuptools, soundfile, tqdm — **plus web deps**: fastapi, uvicorn[standard], jinja2, pydantic
 - **System deps**: `ffmpeg`, `espeak-ng` (chatterbox needs espeak), mecab (mac)
 - **NLTK** `punkt`/`punkt_tab` tokenizers auto-download on first run (~50 MB); location controllable via env var `NLTK_DATA`
 - **Chatterbox model** downloads from HuggingFace on first `ChatterboxTTS.from_pretrained()` (~GBs, cached in `HF_HOME`)
@@ -176,7 +177,8 @@ Pause timing: 600 ms between paragraphs, 2000 ms between chapters (hardcoded in 
    - Prepend chapter title to first paragraph unless `--notitles` or title is `Title`/empty
    - `combine_short_paragraphs()` (< 6-word single-sentence paragraphs merged with next)
    - `combine_short_sentences()` (short sentences merged to ≥ 8 words)
-   - Per sentence: `conditional_sentence_case()` (3 consecutive ALL-CAPS words → lowercase) then `model.generate()` with `torch.inference_mode` + bf16 autocast; 3 retry attempts
+   - **GPU-aware precision** (decided at startup in `read_book`): `use_bf16 = (device=="cuda" and compute-capability major >= 8)`. On **Ampere+** (e.g. 4060 Ti) it enables bf16 autocast **and** TF32 (`matmul.allow_tf32`, `cudnn.allow_tf32`); on **Pascal** (1080/2080, cc 6.1/7.5) it leaves both off → native fp32 (their fastest path; no native bf16, crippled fp16). `cudnn.benchmark` is left off (TTS shapes vary per sentence → autotune re-runs). `torch.inference_mode()` is always on.
+   - Per sentence: `conditional_sentence_case()` (3 consecutive ALL-CAPS words → lowercase) then `model.generate()` wrapped in `torch.inference_mode()` + (bf16 autocast iff `use_bf16`); 3 retry attempts
    - tqdm progress bar per chapter (sentence count); per-paragraph resume via existing `pgraphs<i>.flac`
    - Returns list of `part<i>.flac`
 5. `generate_metadata(files, author, title, chapter_titles)` → `FFMETADATAFILE`
