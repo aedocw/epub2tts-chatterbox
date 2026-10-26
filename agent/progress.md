@@ -109,6 +109,16 @@
 
 **Total: 45/45 checks passed** (44 API/UI + 1 cancel flow)
 
+### HTMX event handler bug fix (2026-10-26)
+- [x] **Bug: `"Failed to create job: undefined"` alert on form submit**
+  - Root cause: `hx-on::after-request` in `home.html` used `event.detail.responseJSON`
+    and `event.detail.response` which **do not exist** in HTMX 1.x.
+    The correct access path is `event.detail.xhr.responseText`.
+  - Fix: replaced with `JSON.parse(event.detail.xhr.responseText)` and
+    used `location.href` for redirect (removed the `job-created` custom event).
+  - Also improved error messages: extracts `detail` from the JSON error body
+    instead of stringifying the whole response.
+
 ### Container restart resilience + Dockerfile fix (2026-10-26)
 - [x] Updated `entrypoint-dev.sh` to auto-start the web server on container boot:
   - `nohup uvicorn ... > /var/log/uvicorn.log 2>&1 &`

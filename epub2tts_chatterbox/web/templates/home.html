@@ -13,10 +13,12 @@
       hx-swap="none"
       hx-on::after-request="
         if (event.detail.successful) {
-          const id = event.detail.responseJSON.id;
-          htmx.trigger(document.body, 'job-created', {id});
+          const data = JSON.parse(event.detail.xhr.responseText);
+          location.href = '/jobs/' + data.id;
         } else {
-          alert('Failed to create job: ' + JSON.stringify(event.detail.response));
+          let msg = 'Unknown error';
+          try { msg = JSON.parse(event.detail.xhr.responseText).detail; } catch(e) {}
+          alert('Failed to create job: ' + msg);
         }">
   <div class="field">
     <label for="book">EPUB (from /data/books)</label>
@@ -53,12 +55,7 @@
   <p class="hint">Creation extracts the book (a few seconds), then you review chapters before starting TTS.</p>
 </form>
 
-<script>
-htmx.on('job-created', (e) => {
-  htmx.trigger('htmx:pushHistory');
-  location.href = '/jobs/' + e.detail.id;
-});
-</script>
+
 
 <h2 style="margin-top:32px">Recent jobs</h2>
 {% if jobs %}
