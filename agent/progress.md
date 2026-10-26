@@ -109,7 +109,20 @@
 
 **Total: 45/45 checks passed** (44 API/UI + 1 cancel flow)
 
-### HTMX event handler bug fix (2026-10-26)
+### HTMX form submission bugs (2026-10-26)
+- [x] **Bug 1: `"Failed to create job: undefined"`**
+  - Root cause: `event.detail.responseJSON` / `event.detail.response` don't exist
+    in HTMX 1.x. Fixed to `event.detail.xhr.responseText`.
+- [x] **Bug 2: `"Failed to create job: [object Object]"`**
+  - Root cause: HTMX with `hx-encoding="json"` serializes ALL form elements,
+    including the `<button type="submit">`. The button's text ("Create job →")
+    was sent as an extra JSON key. FastAPI's Pydantic model rejected the
+    unknown field with a 422 validation error where `detail` is an **array**
+    of objects → `JSON.stringify(array)` → `[object Object]`.
+  - Fix 1: Added `model_config = ConfigDict(extra="ignore")` to `JobCreate`,
+    `MetaUpdate`, and `ChapterUpdate` so extra fields are silently ignored.
+  - Fix 2: Improved error handler to extract `.msg` from array details:
+    `Array.isArray(d) ? d.map(x => x.msg).join(', ') : String(d)`
 - [x] **Bug: `"Failed to create job: undefined"` alert on form submit**
   - Root cause: `hx-on::after-request` in `home.html` used `event.detail.responseJSON`
     and `event.detail.response` which **do not exist** in HTMX 1.x.

@@ -17,7 +17,10 @@
           location.href = '/jobs/' + data.id;
         } else {
           let msg = 'Unknown error';
-          try { msg = JSON.parse(event.detail.xhr.responseText).detail; } catch(e) {}
+          try {
+            const d = JSON.parse(event.detail.xhr.responseText).detail;
+            msg = Array.isArray(d) ? d.map(x => x.msg).join(', ') : String(d);
+          } catch(e) {}
           alert('Failed to create job: ' + msg);
         }">
   <div class="field">

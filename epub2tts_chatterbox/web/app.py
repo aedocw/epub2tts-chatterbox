@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (FileResponse, PlainTextResponse,
                                RedirectResponse, StreamingResponse)
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from . import state as st
 from .supervisor import Supervisor
@@ -47,6 +47,7 @@ async def shutdown():
 
 # --------------------------------------------------------------------- models
 class JobCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     book: str                      # filename inside /data/books
     naming: Optional[str] = "auto"
     notitles: bool = False
@@ -56,6 +57,7 @@ class JobCreate(BaseModel):
 
 
 class MetaUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     title: Optional[str] = None
     author: Optional[str] = None
     sample: Optional[str] = None
@@ -65,6 +67,7 @@ class MetaUpdate(BaseModel):
 
 
 class ChapterUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     title: Optional[str] = None
     text: Optional[str] = None
 
