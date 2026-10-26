@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Jobs — epub2tts-chatterbox{% endblock %}
+{% block content %}
+<h2>Jobs</h2>
+<p class="hint">Only one job transcribes at a time (single 8 GB GPU).
+{% if running %}Currently running: <a href="/jobs/{{ running }}"><b>{{ running }}</b></a>.{% endif %}</p>
+
+{% if jobs %}
+<table>
+  <tr><th>Job</th><th>Book</th><th>State</th><th>Progress</th><th>Created</th><th></th></tr>
+  {% for j in jobs %}
+  <tr>
+    <td><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td>
+    <td class="hint">{{ (j.book.title if j.book else '') }}</td>
+    <td><span class="badge {{ j.state }}">{{ j.state }}</span></td>
+    <td>
+      {% if j.progress %}{{ j.progress.pct }}% (ch. {{ j.progress.chapter }}/{{ j.progress.chapters_total }})
+      {% else %}—{% endif %}
+    </td>
+    <td class="hint">{{ j.created_at }}</td>
+    <td>
+      {% if j.state == 'DONE' %}<a href="/api/jobs/{{ j.id }}/audio">⬇ m4b</a>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="hint">No jobs yet — <a href="/">create one</a>.</p>
+{% endif %}
+{% endblock %}

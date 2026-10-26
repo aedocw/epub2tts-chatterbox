@@ -6,10 +6,10 @@
 #
 # Differences vs. Dockerfile (production):
 #   - installs openssh-server
-#   - ENTRYPOINT runs /app/entrypoint-dev.sh (starts sshd, stays alive)
-#   - does NOT auto-run the CLI; you SSH in and run things yourself
+#   - ENTRYPOINT runs /app/entrypoint-dev.sh (starts sshd + web server, stays alive)
+#   - web server auto-starts on :8080 (no manual start needed after restart)
 #
-# Build (manual, from repo root):
+# Build (manual, from repo root — includes web/ package):
 #   sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
 #
 # Run (GPU passthrough + /data bind mount + SSH keypair mount):
@@ -22,6 +22,7 @@
 #     -v /mnt/dm5/_ebook:/data \
 #     -v /workspace/repos/keys/epub2tts:/root/.ssh:ro \
 #     -p 2222:22 \
+#     -p 8080:8080 \
 #     epub2tts-chatterbox-dev
 #
 # SSH in (agent uses the private key; entrypoint auto-registers the public key):
@@ -61,19 +62,19 @@ RUN mkdir -p /run/sshd \
 # Set working directory
 WORKDIR /app
 
-# Clone the repository
-RUN git clone https://github.com/rejuce/epub2tts-chatterbox.git .
+# Copy the local source (includes web/ package, entrypoint, everything)
+# Build from the repo root:  docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
+COPY . /app/
 
 # Install the package
 RUN pip install --no-cache-dir .
 
-# Copy the dev entrypoint (starts sshd, keeps the container alive)
-COPY entrypoint-dev.sh /app/entrypoint-dev.sh
+# Make the dev entrypoint executable (starts sshd + web server, keeps container alive)
 RUN chmod +x /app/entrypoint-dev.sh
 
 # Create a volume mount point for books/output
 VOLUME /data
 
-EXPOSE 22
+EXPOSE 22 8080
 
 ENTRYPOINT ["/app/entrypoint-dev.sh"]

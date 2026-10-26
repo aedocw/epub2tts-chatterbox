@@ -1,0 +1,26 @@
+# VCS
+.git
+.gitignore
+
+# Agent docs (not needed in the image)
+agent/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Docker files (not needed inside the image)
+Dockerfile
+Dockerfile-dev
+.dockerignore
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store

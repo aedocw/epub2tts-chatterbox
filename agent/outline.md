@@ -28,8 +28,10 @@ Key features:
 - **`Dockerfile-dev`** — copy of `Dockerfile` that additionally installs `openssh-server`,
   enables root SSH login (`PermitRootLogin yes`, password `epub2tts` for dev, or mount your
   `authorized_keys`), `EXPOSE 22`, and uses `ENTRYPOINT ["/app/entrypoint-dev.sh"]`.
-- **`entrypoint-dev.sh`** — starts `sshd`, creates `/data/{books,samples,jobs}`, keeps the
-  container alive with `tail -f /dev/null`. Nothing auto-runs; you SSH in and drive it.
+- **`entrypoint-dev.sh`** — starts `sshd`, creates `/data/{books,samples,jobs}`, auto-starts
+  the web server (`uvicorn epub2tts_chatterbox.web:app` on :8080) with PID file at
+  `/var/run/uvicorn.pid`, logs to `/var/log/uvicorn.log`, keeps the container alive
+  with `tail -f /dev/null`. Survives container restarts — no manual start needed.
 - **Build/run (manual):**
   ```
   sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
@@ -39,10 +41,19 @@ Key features:
     -e HF_HOME=/root/.cache/huggingface \
     -v /mnt/models/epub2tts:/root/.cache/huggingface \
     -v /mnt/dm5/_ebook:/data \
-    -p 2222:22 \
+    -v /workspace/repos/keys/epub2tts:/root/.ssh:ro \
+    -p 2222:22 -p 8080:8080 \
     epub2tts-chatterbox-dev
   # then:  ssh -p 2222 root@<host>   (password: epub2tts)
+  # web UI: http://<host>:8080
   ```
+- **⚠️ Image vs container layer**: `Dockerfile-dev` uses `COPY . /app/` (local source,
+  includes `web/`). Do **not** use `git clone` in the Dockerfile — it would miss the
+  `web/` package until it's pushed to GitHub. After `docker rm + docker run` (e.g. to
+  change port mappings), the container starts fresh from the image. Any files pushed
+  via SSH are on the old container's writable layer and are **lost**. Rebuild the
+  image when code changes to make them permanent.
+- **`.dockerignore`** excludes `agent/`, `.git`, `__pycache__`, `*.egg-info`, etc.
 - **In-container dev:** code lives in `/app` (git checkout); `pip install -e .` for edits,
   run the FastAPI server, tail logs — all over SSH.
 
@@ -59,7 +70,14 @@ epub2tts-chatterbox/
 ├── epub2tts_chatterbox/
 │   ├── __init__.py            # from .epub2tts_chatterbox import main
 │   ├── epub2tts_chatterbox.py # MAIN SCRIPT (CLI, TTS pipeline)
-│   └── epub_export.py         # Reusable EPUB→text/cover extraction library
+│   ├── epub_export.py         # Reusable EPUB→text/cover extraction library
+│   └── web/                   # Web frontend (FastAPI + HTMX/Jinja)
+│       ├── __init__.py        # exports `app`
+│       ├── app.py             # FastAPI routes (pages + API)
+│       ├── state.py           # file-based job state (state.json, progress.json)
+│       ├── supervisor.py      # async job supervisor (subprocess, single-job lock)
+│       ├── templates/         # Jinja2 templates (home, jobs, job)
+│       └── static/            # htmx.min.js (inlined into pages)
 └── agent/                     # THIS folder (outline.md, architecture.md,
                                #   development_environment.md, progress.md)
 ```
@@ -208,16 +226,73 @@ Other useful functions:
 - **Metadata naming**: final filename is `base (<sample-stem>).m4b`; `--notitles` and pauses (600/2000 ms) are hardcoded.
 - **Sample audio**: 30–60 s clean WAV/MP3 recommended.
 
-## 10. Suggested Web-frontend integration sketch
+## 10. Web frontend API (implemented in `web/`)
+
+> The web frontend is implemented as `epub2tts_chatterbox/web/` — a FastAPI app with
+> Jinja2/HTMX templates. Run with `uvicorn epub2tts_chatterbox.web:app --host 0.0.0.0 --port 8080`.
+
+### Job lifecycle states
 
 ```
-POST /jobs {epub_file, sample_file?, cover_file?, naming?, notitles?, exaggeration?, cfg_weight?}
-  1. create job dir /data/jobs/<id>
-  2. export_epub_to_dict(epub, naming_method=naming, verbose=False, interactive=False)
-  3. build <job>/book.txt from the dict (Title/Author/# chapters)  [+ cover.png]
-  4. enqueue worker:
-       chdir(<job dir>); run main() args (or call read_book/generate_metadata/make_m4b/add_cover directly with a shared loaded model)
-GET /jobs/{id}        → status: extracting | transcribing (chapter x/y, sentence i/n) | done
-GET /jobs/{id}/audio  → stream/download the .m4b
+AWAITING_REVIEW → TRANSCRIBING → DONE
+                     ↓
+                 CANCELLED  (resumable — partN.flac checkpoints preserved)
+                     ↓
+                 FAILED     (crash / OOM / bad input — also resumable)
 ```
-Progress can be parsed from stdout (tqdm/ETA lines) or by inspecting `partN.flac` / `pgraphsN.flac` counts in the job dir.
+
+- **Single-job lock**: only ONE job can be `TRANSCRIBING` at a time (1080 8 GB VRAM).
+  `POST /start` returns **409** if a job is already transcribing.
+- **Resume**: starting a `CANCELLED`/`FAILED` job reuses existing `partN.flac`
+  checkpoints — completed chapters are skipped.
+- **Cancel**: `POST /cancel` sends `SIGTERM` to the subprocess; state becomes `CANCELLED`.
+
+### API endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | `{ok, busy}` |
+| `GET` | `/api/books` | List EPUBs from `/data/` subdirs |
+| `GET` | `/api/samples` | List speaker samples from `/data/speaker/` |
+| `POST` | `/api/jobs` | Create job `{book, sample?, cover?, notitles?, exaggeration?, cfg_weight?}` → `AWAITING_REVIEW` |
+| `GET` | `/api/jobs` | List all jobs (newest first) |
+| `GET` | `/api/jobs/{id}` | Job detail + live progress |
+| `PATCH` | `/api/jobs/{id}/meta` | Update title/author/sample/params |
+| `PATCH` | `/api/jobs/{id}/chapters/{ord}` | Edit chapter text/title |
+| `POST` | `/api/jobs/{id}/start` | Start/resume transcription (409 if busy) |
+| `POST` | `/api/jobs/{id}/cancel` | Cancel running job → `CANCELLED` |
+| `GET` | `/api/jobs/{id}/audio` | Download/stream the M4B |
+| `GET` | `/api/jobs/{id}/cover` | Cover image (404 if none) |
+| `GET` | `/api/jobs/{id}/book.txt` | Text content |
+| `GET` | `/api/jobs/{id}/events` | SSE stream for live progress |
+| `DELETE` | `/api/jobs/{id}` | Delete job dir |
+
+### Pages (Jinja2 + HTMX)
+
+- `/` — Home: book browser, sample picker, create-job form
+- `/jobs` — Job list with status badges
+- `/jobs/{id}` — Job detail: progress bar, chapter list, start/cancel/download buttons, SSE auto-refresh
+
+### Key implementation details
+
+- **Supervisor** (`supervisor.py`): async loop in the FastAPI process. Spawns ONE
+  `epub2tts-chatterbox` CLI subprocess per job, tails stdout for tqdm/chapter lines,
+  writes `progress.json` every ~2s, picks up the next queued job on completion.
+- **State** (`state.py`): `state.json` per job dir is the database. Atomic writes via
+  `tempfile.mkstemp` + `os.replace`. `progress.json` is the hot file for live updates.
+- **Progress parsing**: regex on `Chapter (i/N):` and tqdm `X%|...| i/N, R it/s` lines.
+- **Cancel**: `SIGTERM` to the subprocess process group. `JobProcess.cancelled` flag
+  distinguishes user cancel from crash in `_finalize()`.
+- **Orphan recovery**: on server restart, `TRANSCRIBING` jobs with no live process are
+  marked `FAILED` ("interrupted — resumable").
+
+### Test coverage (2026-10-26, 45/45 passed)
+
+- Health, book listing (87 EPUBs), sample listing (7 WAVs)
+- Job creation → AWAITING_REVIEW → detail → PATCH meta → start → TRANSCRIBING → DONE
+- Progress tracking (pct, chapter, chapters_total, eta_sec)
+- M4B output (186,934 bytes) + download
+- 409 protection (busy + done)
+- Cancel → CANCELLED → resume → TRANSCRIBING → cancel → CANCELLED
+- Web UI: home, jobs list, job detail pages all render with HTMX
+- SSE events endpoint, book.txt, cover (404 when absent)

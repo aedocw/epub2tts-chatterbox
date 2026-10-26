@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}{{ job.id }} — epub2tts-chatterbox{% endblock %}
+{% block content %}
+
+<div class="row" style="margin-bottom:6px">
+  <h2>{{ job.id }}</h2>
+  <span class="badge {{ job.state }}" id="state-badge">{{ job.state }}</span>
+</div>
+<p class="hint">
+  Created {{ job.created_at }} · {{ job.book.chapters | length if job.book and job.book.chapters else 0 }} chapters
+  {% if job.output %} · output: {{ job.output.path }} ({{ (job.output.size / 1048576) | round(1) }} MB){% endif %}
+</p>
+
+{% if job.state == 'TRANSCRIBING' or job.state == 'ENCODING' %}
+<div id="live" hx-get="/api/jobs/{{ job.id }}" hx-trigger="every 3s" hx-swap="innerHTML"
+     hx-ext="json-enc">
+{% if job.progress %}
+  <div class="progress" style="margin:12px 0">
+    <div style="width: {{ job.progress.pct }}%"></div>
+    <span>{{ job.progress.pct }}% — chapter {{ job.progress.chapter }}/{{ job.progress.chapters_total }}
+      {% if job.progress.eta_sec is not none %} · ETA {{ job.progress.eta_sec // 3600 }}h {{ (job.progress.eta_sec % 3600) // 60 }}m{% endif %}</span>
+  </div>
+  <pre class="hint" style="max-height:180px; overflow:auto">{{ job.progress.last_stdout }}</pre>
+{% endif %}
+</div>
+<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-confirm="Cancel this job? Checkpoints are kept (resumable).">
+  ⏹ Cancel</button>
+{% endif %}
+
+{% if job.state == 'AWAITING_REVIEW' %}
+<h2>Review before transcribing</h2>
+
+<form hx-patch="/api/jobs/{{ job.id }}/meta" hx-encoding="json" hx-swap="none"
+      hx-ext="json-enc" hx-on::after-request="if(event.detail.successful) htmx.trigger('#review-form','meta-saved')">
+  <div class="row" style="gap:20px">
+    <div class="field" style="flex:2; min-width:220px">
+      <label>Title</label>
+      <input type="text" name="title" value="{{ job.book.title }}">
+    </div>
+    <div class="field" style="flex:2; min-width:220px">
+      <label>Author</label>
+      <input type="text" name="author" value="{{ job.book.author }}">
+    </div>
+  </div>
+  <div class="row" style="gap:20px">
+    <div class="field" style="flex:2; min-width:220px">
+      <label>Voice sample</label>
+      <select name="sample">
+        <option value="">— default voice —</option>
+        {% for s in samples %}
+        <option value="{{ s.rel }}" {% if job.params.sample == s.rel %}selected{% endif %}>
+          {{ s.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field" style="min-width:110px">
+      <label>Exaggeration</label>
+      <input type="text" name="exaggeration" value="{{ job.params.exaggeration }}">
+    </div>
+    <div class="field" style="min-width:110px">
+      <label>CFG weight</label>
+      <input type="text" name="cfg_weight" value="{{ job.params.cfg_weight }}">
+    </div>
+    <div class="field" style="min-width:150px">
+      <label>Titles</label>
+      <select name="notitles">
+        <option value="false" {% if not job.params.notitles %}selected{% endif %}>read titles</option>
+        <option value="true" {% if job.params.notitles %}selected{% endif %}>skip titles</option>
+      </select>
+    </div>
+  </div>
+  <button type="submit">Save settings</button>
+  <span id="saved-hint" class="hint" style="display:none"> ✓ saved</span>
+</form>
+
+{% if text_visible %}
+<h2 style="margin-top:24px">Chapters</h2>
+<p class="hint">Edit titles / text as needed. Each chapter is saved separately.</p>
+<div id="chapters">
+  {% for ch in job.book.chapters %}
+  <div class="ch">
+    <div class="ctitle">
+      <input type="text" id="ch-title-{{ ch.ord }}" value="{{ ch.title }}"
+             hx-patch="/api/jobs/{{ job.id }}/chapters/{{ ch.ord }}" hx-encoding="json" hx-swap="none"
+             hx-trigger="blur changed" hx-ext="json-enc">
+    </div>
+    <textarea id="ch-text-{{ ch.ord }}" rows="6" spellcheck="false"
+              hx-patch="/api/jobs/{{ job.id }}/chapters/{{ ch.ord }}" hx-encoding="json" hx-swap="none"
+              hx-trigger="change" hx-ext="json-enc">{{ ch.text }}</textarea>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="hint">Book too large to edit inline ({{ job.book.chapters | length }} chapters) —
+<a href="/api/jobs/{{ job.id }}/book.txt">download book.txt</a>, edit it on disk,
+then hit Start. The file is re-read on start.</p>
+{% endif %}
+
+<div class="row" style="margin-top:16px">
+  <button hx-post="/api/jobs/{{ job.id }}/start"
+          hx-confirm="Start transcription? This can take hours/days and blocks the GPU.">
+    ▶ Start transcription</button>
+  <button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel"
+          hx-confirm="Delete this job?">Delete job</button>
+</div>
+<script>
+htmx.on('meta-saved', () => {
+  const el = document.getElementById('saved-hint');
+  el.style.display = 'inline';
+  setTimeout(() => el.style.display = 'none', 1500);
+});
+</script>
+{% endif %}
+
+{% if job.state == 'FAILED' %}
+{% if job.error %}<div class="error">{{ job.error }}</div>{% endif %}
+<button hx-post="/api/jobs/{{ job.id }}/resume"
+        hx-confirm="Resume? Finished chapters (part*.flac) are skipped.">
+  ↻ Resume transcription</button>
+<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-confirm="Delete this job?">Delete job</button>
+{% endif %}
+
+{% if job.state == 'CANCELLED' %}
+{% if job.error %}<div class="hint">{{ job.error }}</div>{% endif %}
+<button hx-post="/api/jobs/{{ job.id }}/resume"
+        hx-confirm="Resume from checkpoints?">↻ Resume transcription</button>
+<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-confirm="Delete this job?">Delete job</button>
+{% endif %}
+
+{% if job.state == 'DONE' %}
+<a class="btn" href="/api/jobs/{{ job.id }}/audio">⬇ Download {{ job.output.path }}</a>
+<audio controls src="/api/jobs/{{ job.id }}/audio"></audio>
+<button class="danger" hx-delete="/api/jobs/{{ job.id }}" hx-confirm="Delete this job (removes audio + checkpoints)?">
+  Delete job</button>
+{% endif %}
+
+{% if job.book and job.book.chapters %}
+{% if job.output %}
+{% endif %}
+{% endif %}
+
+{% endblock %}
