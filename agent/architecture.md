@@ -1,7 +1,7 @@
 # Architecture — epub2tts-chatterbox Web Frontend
 
-> Design-only document. No implementation.
-> Goal: a simple Docker Composeable Web frontend wrapping `epub2tts-chatterbox`
+> Final design (single GPU container). Supersedes the earlier 2-service (web + worker) draft.
+> Goal: a Docker-Composeable Web frontend wrapping `epub2tts-chatterbox`
 > with durable, resumable jobs, live progress, and eBook dir browsing.
 
 ---
@@ -10,84 +10,92 @@
 
 | # | Requirement | Approach |
 |---|-------------|----------|
-| G1 | Docker Composeable | `docker-compose.yml` with 2 services + 1 volume |
-| G2 | Conversion can take **days** | Durable: all state in files on a shared volume. Survives restarts. |
+| G1 | Docker Composeable | `docker-compose.dev.yml` — 1 GPU container, 2 bind mounts |
+| G2 | Conversion can take **days** | Durable: all state in files on the shared volume. Survives restarts. |
 | G3 | Show running state on browser reopen | Read `state.json` from the volume — no in-memory dependency |
-| G4 | Progress indicated | `state.json` updated by worker; polled/SSE by web |
+| G4 | Progress indicated | `progress.json` updated by job subprocess tail; SSE by web |
 | G5 | Browse mounted eBook dir | Web lists `.epub` files from the mounted folder |
 | G6 | Two-step, step-1 interactive | State machine in `state.json`; web UI drives the review step |
-| G7 | Dev: external GPU container runs the tool | Worker = any container that can write to the shared volume |
-| G8 | Framework | **FastAPI** + static SPA |
+| G7 | Single GPU, 8 GB VRAM | **Exactly one conversion job runs at a time** (see §6) |
+| G8 | Framework | **FastAPI** + HTMX/Jinja (no JS build step) |
 
-**Core principle: files are the database.** No Postgres, no Redis. Each job is a directory with a `state.json`. The shared volume IS persistence.
+**Core principle: files are the database.** No Postgres, no Redis. Each job is a
+directory with a `state.json`. The shared volume IS persistence.
 
 ---
 
-## 2. Components (2 services + 1 volume)
+## 2. Components (1 container, 2 bind mounts)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Browser (SPA)                         │
+│                    Browser (HTMX)                        │
 └────────────────────┬────────────────────────────────────┘
-                     │ HTTPS (REST + SSE)
+                     │ HTTP (REST + SSE)
 ┌────────────────────▼────────────────────────────────────┐
-│  web  (FastAPI, CPU)                                    │
-│  - Serves static SPA (React/Vue/build)                  │
-│  - REST API: books, jobs, progress, audio               │
-│  - SSE for live progress                                │
-│  - Reads/writes state.json in job dirs                  │
-│  - Enqueues by writing state to "queued"                │
+│  Container: epub2tts-chatterbox-dev (GPU, 1080 8 GB)    │
+│                                                         │
+│  FastAPI app  (epub2tts_chatterbox.web)                 │
+│  - Serves Jinja templates + HTMX (static)              │
+│  - REST API: books, jobs, progress, audio              │
+│  - SSE for live progress                               │
+│  - Reads/writes state.json in job dirs                 │
+│  - Job supervisor: spawns ONE `epub2tts-chatterbox`    │
+│    CLI subprocess in the job dir, tails its stdout into │
+│    progress.json, enforces the single-job lock         │
 └────────────────────┬────────────────────────────────────┘
                      │ reads/writes shared volume
 ┌────────────────────▼────────────────────────────────────┐
-│  worker  (GPU container)                                │
-│  - Polls for jobs in "queued" state                     │
-│  - chdir into job dir, runs TTS                         │
-│  - Updates state.json as it progresses                  │
-│  - Writes progress.json, partN.flac, final .m4b         │
-└────────────────────┬────────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────────┐
-│  Shared volume: /data                                   │
-│    /books/       ← host-mounted eBooks (RO)             │
+│  /data  (bind mount → host /mnt/dm5/_ebook)             │
+│    /books/       ← host-mounted eBooks (RO in spirit)   │
 │    /samples/     ← voice sample wavs                    │
 │    /jobs/<slug>/ ← per-job workdir (see §5)             │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**That's it. Two containers. One volume. No database. No queue service.**
+**One container. Two bind mounts (`/data`, HF model cache). No database. No queue service.**
+
+The FastAPI process is both server **and** job supervisor. Each TTS job runs as a
+separate **subprocess** (the CLI in its job dir), so:
+- job lifetime is decoupled from the web process (uvicorn reload / crash is safe),
+- the tool's built-in `partN.flac` checkpoints give crash-resume,
+- killing the subprocess = clean cancel (checkpoints preserved).
 
 ---
 
 ## 3. Job lifecycle (state machine in `state.json`)
 
 ```
- DRAFT → EXTRACTING → AWAITING_REVIEW → TRANSCRIBING → ENCODING → DONE
-                 ↘ FAILED / CANCELLED (any state)
+ DRAFT → AWAITING_REVIEW → TRANSCRIBING → ENCODING → DONE
+                 ↘ FAILED / CANCELLED (any state after DRAFT)
 ```
 
 | State | Who sets it | What happens |
 |-------|-----------|--------------|
 | `DRAFT` | Web (on job creation) | Book selected, params saved. Nothing run yet. |
-| `EXTRACTING` | Web | `export_epub_to_dict()` runs (CPU, fast, seconds). Writes chapters to `state.json`. |
-| `AWAITING_REVIEW` | Web | **Interactive step.** UI shows extracted chapters. User edits titles/text, picks naming method, sample, cover. Clicks "Start". |
-| `TRANSCRIBING` | Worker | Long TTS step. Worker polls for `queued`/`transcribing` jobs, chdir into job dir, runs tool. Updates `state.json` progress. |
-| `ENCODING` | Worker | ffmpeg concat + metadata + cover. Short. |
-| `DONE` | Worker | `.m4b` ready. |
-| `FAILED` | Worker | `error` field set. Can be resumed. |
-| `CANCELLED` | Web | User cancelled. Checkpoints preserved for resume. |
+| `AWAITING_REVIEW` | Web | After `export_epub_to_dict()` ran (CPU, fast, seconds). **Interactive step.** UI shows extracted chapters. User edits titles/text, picks naming method, sample, cover. Clicks "Start". |
+| `TRANSCRIBING` | Web (Start/resume click, if no job is running) | Job supervisor spawns the CLI subprocess in the job dir. TTS runs for hours/days. |
+| `ENCODING` | Supervisor (on process exit code 0, before `.m4b` verification) | ffmpeg concat + metadata + cover (happens inside the subprocess, supervisor just detects completion). |
+| `DONE` | Supervisor | `.m4b` exists in job dir. |
+| `FAILED` | Supervisor | Non-zero exit / exception. `error` field set from stderr tail. Can be resumed. |
+| `CANCELLED` | Web | User cancelled → supervisor kills the subprocess. Checkpoints preserved for resume. |
 
-**Resume:** On worker restart (or crash), it scans `/data/jobs/` for jobs in `TRANSCRIBING` state, chdir's in, re-runs the tool — the tool's built-in `partN.flac` / `pgraphsN.flac` checkpoints make it pick up where it left off. No external queue needed.
+**Note:** `EXTRACTING` is a transient, web-side-only phase (fast, in-request);
+the job lands on disk already in `AWAITING_REVIEW`. No need to persist it.
+
+**Resume:** On web restart, the supervisor scans `/data/jobs/` for jobs in
+`TRANSCRIBING` state with no live subprocess → marks them `FAILED`
+(`"interrupted — resumable"`), UI offers Resume. Resuming re-spawns the CLI in
+the same job dir — the tool skips existing `partN.flac` / `pgraphsN.flac`.
 
 ---
 
 ## 4. eBook browsing
 
-- Host mounts eBooks folder → `/data/books` (read-only).
+- Host mounts eBooks folder → `/data/books`.
 - `GET /api/books` → FastAPI lists `.epub` files (name, size, date).
-- `GET /api/books/{name}/meta` → quick `export_epub_to_dict(..., interactive=False)` for preview (title, author, chapter count, cover).
+- `GET /api/books/{name}/meta` → `export_epub_to_dict(..., interactive=False)` for preview (title, author, chapter count, cover).
 - `GET /api/samples` → lists `/data/samples/*.wav|mp3`.
-- User picks a book → POST `/api/jobs` → creates `DRAFT` job dir.
+- User picks a book → `POST /api/jobs` → creates `DRAFT` job dir, runs extraction, lands in `AWAITING_REVIEW`.
 
 ---
 
@@ -99,19 +107,20 @@
     book.txt            ← step-1 output (user-editable)
     cover.png           ← extracted or user-provided
     sample.wav          ← voice sample (if used)
-    progress.json       ← live progress (worker writes, more granular)
+    progress.json       ← live progress (supervisor writes from subprocess stdout)
+    stdout.log          ← full CLI output (tail source, debug)
     part1.flac          ← TTS checkpoints (tool writes)
     part2.flac
     ...
     <base> (<spk>).m4b  ← FINAL OUTPUT
-    error.txt           ← if FAILED
+    error.txt           ← if FAILED (stderr tail)
 ```
 
 ### `state.json` schema
 
 ```json
 {
-  "id": "mybook-20260717",
+  "id": "mybook-20260717-1430",
   "state": "AWAITING_REVIEW",
   "book_path": "/data/books/mybook.epub",
   "created_at": "2026-07-17T10:00:00Z",
@@ -154,54 +163,59 @@
 }
 ```
 
-**This one file is the entire "database" for a job.** Web reads it to render UI. Worker writes to it as it progresses. No external store.
+**This one file is the entire "database" for a job.** Web reads it to render UI.
+Supervisor + subprocess write to it as they progress. No external store.
 
-### `progress.json` (optional, more granular / lower-level)
+### `progress.json` (hot-update signal)
 
-The tool already prints per-sentence progress. The worker wrapper can write a finer-grained file for SSE streaming. But `state.json` is the canonical state — `progress.json` is just a hot-update signal.
+The supervisor tails the subprocess stdout (tqdm / per-chapter Elapsed-ETA
+lines), parses sentence/chapter counts, and writes `progress.json` + mirrors a
+summary into `state.json.progress`. SSE tails `progress.json` for live UI
+updates; plain polling of `state.json` is the fallback.
 
 ---
 
-## 6. How the worker works (simple polling)
+## 6. Job supervision — single-job lock
+
+**Hard constraint: exactly ONE job in `TRANSCRIBING` at a time.**
+Two parallel CLI instances would each load the Chatterbox model into the
+1080's 8 GB VRAM → OOM. The supervisor enforces this:
 
 ```python
-# Pseudocode — the worker loop
-while True:
-    for job_dir in scan("/data/jobs/"):
-        state = read(job_dir / "state.json")
-        if state["state"] == "TRANSCRIBING":
-            chdir(job_dir)
-            # Resume-safe: tool checks for existing partN.flac
-            run_tool(state["params"])  # or call read_book() directly
-            update_state(job_dir, state="DONE")
-            break  # one job at a time (single GPU)
-    sleep(5)
+# Supervisor (inside FastAPI app, background task)
+async def supervise():
+    while True:
+        # 1. Track our own subprocess if running
+        if proc is not None:
+            update progress.json from stdout tail
+            if proc exited:
+                finalize (DONE / FAILED), proc = None
+        # 2. Otherwise, pick the next queued job
+        else:
+            job = oldest job in state AWAITING_REVIEW+started / TRANSCRIBING-orphan
+            if job: spawn CLI subprocess in job dir
+        await sleep(2)
 ```
 
-- **Single GPU** → process one job at a time. Next job starts after current finishes.
-- **No queue service** — the "queue" is just the directory scan. Jobs in `AWAITING_REVIEW` → user clicks Start → web sets state to `TRANSCRIBING` → worker picks it up on next poll.
-- **Crash recovery** — on startup, worker re-scans; finds `TRANSCRIBING` jobs; resumes (tool checkpoints handle the rest).
+- Start/resume endpoints **refuse** (409) if a job is already running:
+  `"another job is transcribing — only one GPU job allowed"`.
+- On startup: any orphaned `TRANSCRIBING` job (no live proc) → `FAILED`
+  with `error: "interrupted — resumable"`.
+- Progress source = subprocess stdout (tqdm per chapter, Elapsed/ETA lines)
+  parsed into `progress.json`.
 
 ---
 
-## 7. Web → Worker communication
+## 7. Web → Job communication
 
-**No message broker.** Just:
-1. Web writes `state.json` with `state: "TRANSCRIBING"` (user clicked Start).
-2. Worker polls (every 3–5 s) for jobs in that state.
-3. Worker updates `state.json` as it goes.
-4. Web reads `state.json` / `progress.json` to show progress.
+**No message broker.** The supervisor lives in the FastAPI process and
+spawns/kills the CLI subprocess directly. Files on `/data` remain the durable
+contract, so a web restart loses nothing:
 
-SSE endpoint in FastAPI:
-```
-GET /api/jobs/{id}/events
-  → tails progress.json / state.json, pushes changes as SSE events
-```
-
-Polling fallback:
-```
-GET /api/jobs/{id}  → returns state.json contents
-```
+1. User clicks Start → web sets `state.json` → `TRANSCRIBING` → supervisor
+   spawns the subprocess in the job dir (within ~2 s).
+2. Supervisor tails stdout → `progress.json` + `state.json`.
+3. Web reads `state.json` / `progress.json` to render progress (SSE).
 
 ---
 
@@ -211,14 +225,14 @@ GET /api/jobs/{id}  → returns state.json contents
 GET  /api/books                  # list .epub in /data/books
 GET  /api/books/{name}/meta      # preview: title, author, chapters, cover
 GET  /api/samples                # list voice samples
-POST /api/jobs                   # create DRAFT {book, params}
+POST /api/jobs                   # create DRAFT → extract → AWAITING_REVIEW
 GET  /api/jobs                   # list all jobs (scan /data/jobs/)
 GET  /api/jobs/{id}              # read state.json
 PATCH /api/jobs/{id}             # edit chapters/params (AWAITING_REVIEW only)
-POST /api/jobs/{id}/start        # AWAITING_REVIEW → TRANSCRIBING
-POST /api/jobs/{id}/cancel       # → CANCELLED
-POST /api/jobs/{id}/resume       # FAILED/CANCELLED → TRANSCRIBING
-GET  /api/jobs/{id}/events       # SSE progress stream
+POST /api/jobs/{id}/start        # AWAITING_REVIEW → TRANSCRIBING (409 if busy)
+POST /api/jobs/{id}/cancel       # → CANCELLED (supervisor kills subprocess)
+POST /api/jobs/{id}/resume       # FAILED/CANCELLED → TRANSCRIBING (409 if busy)
+GET  /api/jobs/{id}/events       # SSE progress stream (tails progress.json)
 GET  /api/jobs/{id}/audio        # stream final .m4b
 GET  /api/jobs/{id}/cover        # cover image
 ```
@@ -227,37 +241,32 @@ All of these are **file I/O** on the shared volume. No database calls.
 
 ---
 
-## 9. Docker Compose (conceptual)
+## 9. Docker Compose (dev, as built)
+
+See `docker-compose.dev.yml` in the repo root. Summary:
 
 ```yaml
 services:
-  web:
-    build: ./web          # FastAPI + SPA
+  web:  # single container, GPU
+    build: . (Dockerfile-dev)
     volumes:
-      - /data:/data       # shared volume
+      - /mnt/models/epub2tts:/root/.cache/huggingface
+      - /mnt/dm5/_ebook:/data
+      - <ssh keys>:/root/.ssh:ro
     ports:
-      - "8080:8080"
-
-  worker:
-    image: pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
-    # (or the user's dev GPU container)
-    volumes:
-      - /data:/data
+      - "2222:22"     # dev SSH
+      - "8080:8080"   # FastAPI
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
-    # command: python /data/worker.py  (or mounted script)
-
-volumes:
-  # /data is a bind mount from the host in practice
+              count: 1            # GPU index 1 on host
 ```
 
-**Dev override** (`docker-compose.dev.yml`):
-- `worker` replaced by the user's external GPU container + shared folder + script.
-- Same volume contract.
+Dev flow: SSH in, edit `/app` on branch `dev`, `pip install -e .`,
+run uvicorn. Production: same image, drop SSH, run the supervisor as the
+service command.
 
 ---
 
@@ -265,39 +274,44 @@ volumes:
 
 | Failure | Recovery |
 |---------|----------|
-| Browser closed | No effect. Job continues in worker. Reopen → read `state.json`. |
-| Worker crash/restart | Re-scans job dirs. Finds `TRANSCRIBING`. Tool resumes from `partN.flac`. |
-| Web restart | Stateless. Re-reads job dirs. |
-| Power loss | Same as worker crash. Checkpoints on disk. |
+| Browser closed | No effect. Job continues in subprocess. Reopen → read `state.json`. |
+| Web/uvicorn restart | Supervisor re-scans. Orphaned `TRANSCRIBING` → `FAILED (resumable)`. |
+| Subprocess crash | Non-zero exit → `FAILED`, stderr tail in `error.txt`. Resume re-spawns in same dir; `partN.flac` checkpoints skip finished chapters. |
+| Power loss | Same as subprocess crash. Checkpoints on disk. |
 | Per-sentence TTS failure | Tool retries 3× (built-in). If all fail, logged, continues. |
-| User cancels | Web sets `CANCELLED`. Worker stops. Checkpoints remain for later resume. |
+| User cancels | Web sets `CANCELLED`; supervisor kills subprocess. Checkpoints remain for later resume. |
+| Second Start click | Rejected with 409 — single-job lock. |
 
 ---
 
 ## 11. Security (minimal)
 
-- `/data/books` mounted read-only.
-- API only exposes paths under `/data/` (no traversal).
+- `/data/books` treated as read-only by the app (no write endpoints for it).
+- API only exposes paths under `/data/` (no traversal; job IDs are slugs, not paths).
 - Single-user tool — no auth needed initially. (Optional: reverse proxy + basic auth for LAN exposure.)
 
 ---
 
-## 12. What we eliminated (vs. previous design)
+## 12. Decided (was: open decisions)
+
+| Decision | Choice |
+|----------|--------|
+| SPA framework | **HTMX + Jinja templates** — no build step, minimal JS |
+| Worker invocation | **CLI subprocess per job** in its job dir (keeps model lifecycle per-job; 1080 8 GB fits one instance) |
+| Progress granularity | **SSE tailing `progress.json`**, written by the supervisor from subprocess stdout; polling `state.json` as fallback |
+| Job naming/slug | `<book-title-slug>-<YYYYMMDD-HHMM>` |
+| Notifications | **Skipped** (browser shows progress via SSE) |
+| Concurrency | **Exactly one job transcribing at a time** (VRAM constraint) |
+
+---
+
+## 13. What we eliminated (vs. previous designs)
 
 | Removed | Why |
 |---------|-----|
 | **Postgres** | `state.json` per job dir is the database. Sufficient for < 1000 jobs. |
-| **Redis / message queue** | Worker polls the directory. One GPU = one job at a time. No broker needed. |
-| **Separate "queue" service** | The directory scan IS the queue. |
+| **Redis / message queue** | Supervisor in-process; directory scan for discovery. One GPU = one job. |
+| **Separate worker container/service** | Single container: FastAPI app is server + supervisor; jobs are subprocesses. |
+| **In-request extraction state (`EXTRACTING` persisted)** | Extraction is fast and in-request; job lands in `AWAITING_REVIEW` on disk. |
 
-**Net: 2 containers, 1 volume, files as state. Simple to reason about, simple to debug, simple to back up (tar the jobs dir).**
-
----
-
-## 13. Open decisions
-
-1. **SPA framework** — React, Vue, Svelte, or plain HTMX? (Suggest: simplest that works — maybe HTMX + Jinja for minimal JS.)
-2. **Worker invocation** — CLI subprocess in job dir (simplest, works for dev) vs. direct function calls with shared model (better for prod, avoids model reload per job).
-3. **Progress granularity** — poll `state.json` every 2 s vs. SSE tailing `progress.json`.
-4. **Job naming/slug** — `<book-title-slug>-<timestamp>` to avoid collisions.
-5. **Notifications** (optional) — desktop notification / email on DONE.
+**Net: 1 container, 2 mounts, files as state. Simple to reason about, simple to debug, simple to back up (tar the jobs dir).**

@@ -60,7 +60,8 @@ epub2tts-chatterbox/
 │   ├── __init__.py            # from .epub2tts_chatterbox import main
 │   ├── epub2tts_chatterbox.py # MAIN SCRIPT (CLI, TTS pipeline)
 │   └── epub_export.py         # Reusable EPUB→text/cover extraction library
-└── agent/                     # THIS folder (progress.md, outline.md)
+└── agent/                     # THIS folder (outline.md, architecture.md,
+                               #   development_environment.md, progress.md)
 ```
 
 ## 3. Dependencies & environment

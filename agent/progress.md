@@ -30,6 +30,16 @@
 - [x] Added `entrypoint-dev.sh` — starts `sshd`, creates `/data/{books,samples,jobs}`, keeps container alive (`tail -f /dev/null`)
 - [x] Updated `outline.md` with the dev container + SSH flow
 
+### Phase 5 — Dev environment live + architecture final review (2026-07-2x)
+- [x] Dev container running; agent develops over SSH (`agent/development_environment.md`)
+- [x] Architecture review with user — decisions confirmed:
+  - HTMX + Jinja (no JS build)
+  - CLI subprocess per job (supervisor in FastAPI app)
+  - SSE tailing `progress.json` (written from subprocess stdout), polling fallback
+  - Slug `<book-title-slug>-<YYYYMMDD-HHMM>`
+  - No notifications
+  - **New constraint: exactly ONE job transcribing at a time** (2 CLI instances won't fit in 1080 8 GB VRAM) → supervisor enforces single-job lock, Start/Resume return 409 when busy
+- [x] Rewrote `agent/architecture.md` to the final single-container design (supervisor, single-job lock, confirmed decisions; dropped obsolete 2-service/worker-polling sections)
+
 ### Next
-- [ ] User manually builds/runs the `container`-branch image, then agent SSHes in for live development
-- [ ] Implement the single FastAPI app (SPA + API + job supervision) inside the container
+- [ ] Implement `epub2tts_chatterbox/web/` (FastAPI app + Jinja/HTMX frontend + job supervisor) in the container over SSH
