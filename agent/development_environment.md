@@ -41,6 +41,15 @@ ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
 | `/root/.ssh` | Read-only mount of `/workspace/repos/keys/epub2tts` (git deploy key + SSH keypair) |
 | `/opt/conda/bin/python3` | **Python 3.10.13** — always use this absolute path |
 | `/opt/conda/bin/pip` | pip for the conda env |
+| `/data/speakers/sample2.wav` | Voice sample to use as speaker |
+| `/data/devel/` | **Testing directory** — use exclusively for ebook generation tests. Contains `sample3.wav` |
+
+## Testing Data
+
+- **Ebook source:** `/data` (bind mount from host `/mnt/dm5/_ebook`) — the user's full library.
+- **Speaker sample (production):** `/data/speakers/sample2.wav`
+- **Testing directory:** `/data/devel/` — contains `sample3.wav`.
+  > ⚠️ **For now, exclusively use `/data/devel/` for testing ebook generation.** Do not write job output to `/data/jobs/` or other dirs until explicitly told to.
 
 ## Important Gotchas
 
