@@ -12,8 +12,7 @@
 </p>
 
 {% if job.state == 'TRANSCRIBING' or job.state == 'ENCODING' %}
-<div id="live" hx-get="/api/jobs/{{ job.id }}" hx-trigger="every 3s" hx-swap="innerHTML"
-     hx-ext="json-enc">
+<div id="live" hx-get="/api/jobs/{{ job.id }}/progress" hx-trigger="every 3s" hx-swap="innerHTML">
 {% if job.progress %}
   <div class="progress" style="margin:12px 0">
     <div style="width: {{ job.progress.pct }}%"></div>
@@ -30,8 +29,8 @@
 {% if job.state == 'AWAITING_REVIEW' %}
 <h2>Review before transcribing</h2>
 
-<form hx-patch="/api/jobs/{{ job.id }}/meta" hx-encoding="json" hx-swap="none"
-      hx-ext="json-enc" hx-on::after-request="if(event.detail.successful) htmx.trigger('#review-form','meta-saved')">
+<form hx-patch="/api/jobs/{{ job.id }}/meta" hx-swap="none"
+      hx-on::after-request="if(event.detail.successful) htmx.trigger('#review-form','meta-saved')">
   <div class="row" style="gap:20px">
     <div class="field" style="flex:2; min-width:220px">
       <label>Title</label>
@@ -81,13 +80,13 @@
   {% for ch in job.book.chapters %}
   <div class="ch">
     <div class="ctitle">
-      <input type="text" id="ch-title-{{ ch.ord }}" value="{{ ch.title }}"
-             hx-patch="/api/jobs/{{ job.id }}/chapters/{{ ch.ord }}" hx-encoding="json" hx-swap="none"
-             hx-trigger="blur changed" hx-ext="json-enc">
+      <input type="text" id="ch-title-{{ ch.ord }}" name="title" value="{{ ch.title }}"
+             hx-patch="/api/jobs/{{ job.id }}/chapters/{{ ch.ord }}" hx-swap="none"
+             hx-trigger="blur changed">
     </div>
-    <textarea id="ch-text-{{ ch.ord }}" rows="6" spellcheck="false"
-              hx-patch="/api/jobs/{{ job.id }}/chapters/{{ ch.ord }}" hx-encoding="json" hx-swap="none"
-              hx-trigger="change" hx-ext="json-enc">{{ ch.text }}</textarea>
+    <textarea id="ch-text-{{ ch.ord }}" name="text" rows="6" spellcheck="false"
+              hx-patch="/api/jobs/{{ job.id }}/chapters/{{ ch.ord }}" hx-swap="none"
+              hx-trigger="change">{{ ch.text }}</textarea>
   </div>
   {% endfor %}
 </div>
@@ -98,11 +97,13 @@ then hit Start. The file is re-read on start.</p>
 {% endif %}
 
 <div class="row" style="margin-top:16px">
-  <button hx-post="/api/jobs/{{ job.id }}/start"
-          hx-confirm="Start transcription? This can take hours/days and blocks the GPU.">
+  <button hx-post="/api/jobs/{{ job.id }}/start" hx-swap="none"
+          hx-confirm="Start transcription? This can take hours/days and blocks the GPU."
+          hx-on::after-request="if(event.detail.successful) location.reload()">
     ▶ Start transcription</button>
-  <button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel"
-          hx-confirm="Delete this job?">Delete job</button>
+  <button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-swap="none"
+          hx-confirm="Delete this job?"
+          hx-on::after-request="if(event.detail.successful) location.reload()">Delete job</button>
 </div>
 <script>
 htmx.on('meta-saved', () => {
@@ -115,17 +116,21 @@ htmx.on('meta-saved', () => {
 
 {% if job.state == 'FAILED' %}
 {% if job.error %}<div class="error">{{ job.error }}</div>{% endif %}
-<button hx-post="/api/jobs/{{ job.id }}/resume"
-        hx-confirm="Resume? Finished chapters (part*.flac) are skipped.">
+<button hx-post="/api/jobs/{{ job.id }}/resume" hx-swap="none"
+        hx-confirm="Resume? Finished chapters (part*.flac) are skipped."
+        hx-on::after-request="if(event.detail.successful) location.reload()">
   ↻ Resume transcription</button>
-<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-confirm="Delete this job?">Delete job</button>
+<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-swap="none" hx-confirm="Delete this job?"
+        hx-on::after-request="if(event.detail.successful) location.reload()">Delete job</button>
 {% endif %}
 
 {% if job.state == 'CANCELLED' %}
 {% if job.error %}<div class="hint">{{ job.error }}</div>{% endif %}
-<button hx-post="/api/jobs/{{ job.id }}/resume"
-        hx-confirm="Resume from checkpoints?">↻ Resume transcription</button>
-<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-confirm="Delete this job?">Delete job</button>
+<button hx-post="/api/jobs/{{ job.id }}/resume" hx-swap="none"
+        hx-confirm="Resume from checkpoints?"
+        hx-on::after-request="if(event.detail.successful) location.reload()">↻ Resume from checkpoints</button>
+<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-swap="none" hx-confirm="Delete this job?"
+        hx-on::after-request="if(event.detail.successful) location.reload()">Delete job</button>
 {% endif %}
 
 {% if job.state == 'DONE' %}

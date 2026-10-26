@@ -361,6 +361,16 @@ async def api_job_state(job_id: str):
     return state
 
 
+@app.get("/api/jobs/{job_id}/progress")
+async def api_job_progress(job_id: str, request: Request):
+    """Lightweight progress HTML fragment for HTMX polling — no chapters."""
+    state = _job_or_404(job_id)
+    live = st.read_progress(DATA_ROOT, job_id)
+    return templates.TemplateResponse("progress.html", {
+        "request": request, "job": state, "progress": live,
+    })
+
+
 def _start_job(job_id: str):
     state = _job_or_404(job_id)
     if state["state"] not in (st.AWAITING_REVIEW, st.FAILED, st.CANCELLED):

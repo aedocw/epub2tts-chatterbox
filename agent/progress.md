@@ -141,6 +141,23 @@
     sends standard `application/x-www-form-urlencoded` data (the default).
   - **Verified:** `POST /api/jobs` with URL-encoded form data → 404 "book not found"
     (expected, since test book doesn't exist on server) — no more 422 validation error.
+- [x] **Bug: clicking Start/Resume dumped huge JSON of all chapters into the page**
+  - Root cause: `hx-post` on start/resume/cancel buttons had no `hx-swap="none"`,
+    so HTMX swapped the full JSON response (all chapters) into the page via
+    default `innerHTML`. Also, the live progress poller hit `GET /api/jobs/{id}`
+    which returns the full job state including all chapters.
+  - Fix:
+    1. Added `hx-swap="none"` + `hx-on::after-request` (reload on success)
+       to all start/resume/cancel buttons in `job.html`.
+    2. Created new lightweight endpoint `GET /api/jobs/{id}/progress`
+       that returns only `{state, progress}` as an HTML fragment
+       (`templates/progress.html`) — no chapters.
+    3. Changed the `#live` div to poll `/api/jobs/{id}/progress` instead of
+       `/api/jobs/{id}`.
+    4. Also removed `hx-encoding="json"` + `hx-ext="json-enc"` from the
+       meta form and chapter inputs (same Form params fix as home.html).
+  - **Verified:** `GET /api/jobs/{id}/progress` → 389-char HTML fragment
+    with progress bar + stdout, no chapters.
 
 ### Container restart resilience + Dockerfile fix (2026-10-26)
 - [x] Updated `entrypoint-dev.sh` to auto-start the web server on container boot:

@@ -256,7 +256,8 @@ AWAITING_REVIEW → TRANSCRIBING → DONE
 | `GET` | `/api/samples` | List speaker samples from `/data/speaker/` |
 | `POST` | `/api/jobs` | Create job `{book, sample?, cover?, notitles?, exaggeration?, cfg_weight?}` → `AWAITING_REVIEW` |
 | `GET` | `/api/jobs` | List all jobs (newest first) |
-| `GET` | `/api/jobs/{id}` | Job detail + live progress |
+| `GET` | `/api/jobs/{id}` | Job detail + live progress (full state) |
+| `GET` | `/api/jobs/{id}/progress` | Lightweight progress HTML fragment (for HTMX polling) |
 | `PATCH` | `/api/jobs/{id}/meta` | Update title/author/sample/params |
 | `PATCH` | `/api/jobs/{id}/chapters/{ord}` | Edit chapter text/title |
 | `POST` | `/api/jobs/{id}/start` | Start/resume transcription (409 if busy) |
