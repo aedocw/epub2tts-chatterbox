@@ -12,7 +12,7 @@
 # Build (manual, from repo root):
 #   sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
 #
-# Run (GPU passthrough + /data bind mount):
+# Run (GPU passthrough + /data bind mount + SSH keypair mount):
 #   sudo docker run -d --name epub2tts-chatterbox-dev \
 #     --gpus all \
 #     -e NVIDIA_VISIBLE_DEVICES=all \
@@ -20,8 +20,13 @@
 #     -e HF_HOME=/root/.cache/huggingface \
 #     -v /mnt/models/epub2tts:/root/.cache/huggingface \
 #     -v /mnt/dm5/_ebook:/data \
+#     -v /workspace/repos/keys/epub2tts:/root/.ssh:ro \
 #     -p 2222:22 \
 #     epub2tts-chatterbox-dev
+#
+# SSH in (agent uses the private key; entrypoint auto-registers the public key):
+#   ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
+#     -o StrictHostKeyChecking=accept-new -p 2222 root@<host>
 
 # Use a base image with CUDA and Python
 FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
@@ -42,14 +47,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 3. SSH server configuration
 #    - host keys
 #    - allow root login (dev-only container, personal use)
-#    - a known root password so the agent can SSH in without pre-seeding a key.
-#      For a tighter setup, mount your public key into /root/.ssh/authorized_keys
-#      at run time and set USE_SSH_PASSWORD=no.
+#    - pubkey auth on; the agent's public key is mounted at /root/.ssh (RO) and
+#      wired into authorized_keys by entrypoint-dev.sh at startup.
+#    - a root password is kept as a fallback.
 RUN mkdir -p /run/sshd \
     && ssh-keygen -A \
     && sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's|^#*AuthorizedKeysFile.*|AuthorizedKeysFile /etc/ssh/authorized_keys /root/.ssh/authorized_keys|' /etc/ssh/sshd_config \
     && echo 'root:epub2tts' | chpasswd
 
 # Set working directory

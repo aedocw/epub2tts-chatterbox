@@ -11,8 +11,17 @@ set -euo pipefail
 mkdir -p /run/sshd
 mkdir -p /data /data/books /data/samples /data/jobs
 
-# Allow SSH access to the /data mount if it exists
-# (no-op safeguard; /data is a bind mount)
+# SSH: wire the mounted public key into a writable authorized_keys.
+# The key dir is bind-mounted READ-ONLY at /root/.ssh, so we cannot write
+# authorized_keys inside it. Instead we copy the public key out to
+# /etc/ssh/authorized_keys, which sshd is configured to read (see Dockerfile).
+if [ -f /root/.ssh/github-epub2tts.pub ]; then
+    cp /root/.ssh/github-epub2tts.pub /etc/ssh/authorized_keys
+    chmod 600 /etc/ssh/authorized_keys
+    echo "[entrypoint-dev] authorized_keys set from mounted public key."
+else
+    echo "[entrypoint-dev] WARNING: /root/.ssh/github-epub2tts.pub not found; key auth disabled."
+fi
 
 echo "[entrypoint-dev] starting sshd..."
 /usr/sbin/sshd
