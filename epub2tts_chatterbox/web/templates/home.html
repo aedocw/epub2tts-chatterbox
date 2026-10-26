@@ -9,7 +9,7 @@
   {% endif %}
 </div>
 
-<form id="new-job" hx-post="/api/jobs" hx-encoding="json"
+<form id="new-job" hx-post="/api/jobs"
       hx-swap="none"
       hx-on::after-request="
         if (event.detail.successful) {

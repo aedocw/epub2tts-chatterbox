@@ -12,7 +12,7 @@ import shutil
 import time
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Form, Request
 from fastapi.responses import (FileResponse, PlainTextResponse,
                                RedirectResponse, StreamingResponse)
 from fastapi.templating import Jinja2Templates
@@ -203,23 +203,33 @@ async def api_samples():
 
 
 @app.post("/api/jobs")
-async def api_create_job(payload: JobCreate):
-    book_path = _safe_data_path(payload.book)
+async def api_create_job(
+    book: str = Form(...),
+    naming: Optional[str] = Form("auto"),
+    sample: Optional[str] = Form(None),
+    notitles: Optional[bool] = Form(False),
+    exaggeration: Optional[str] = Form(None),
+    cfg_weight: Optional[str] = Form(None),
+):
+    book_path = _safe_data_path(book)
     if not os.path.isfile(book_path) or not book_path.lower().endswith(".epub"):
         raise HTTPException(404, "book not found")
     book_name = os.path.basename(book_path)
 
     from epub2tts_chatterbox.epub_export import export_epub_to_dict
-    data = export_epub_to_dict(book_path, naming_method=payload.naming,
+    data = export_epub_to_dict(book_path, naming_method=naming,
                                verbose=False, interactive=False)
 
     # sample: accept name in /data/samples or a relative path under /data
-    sample_rel = None
-    if payload.sample:
-        sample_rel = payload.sample
+    sample_rel = sample if sample else None
+    if sample_rel:
         sample_path = _safe_data_path(sample_rel)
         if not os.path.isfile(sample_path):
-            raise HTTPException(404, f"sample not found: {payload.sample}")
+            raise HTTPException(404, f"sample not found: {sample}")
+
+    # convert optional numeric fields from string
+    exag = float(exaggeration) if exaggeration else 0.7
+    cfg_w = float(cfg_weight) if cfg_weight else 0.4
 
     title = data.get("title") or book_name
     job_id = st.make_job_id(title)
@@ -237,10 +247,10 @@ async def api_create_job(payload: JobCreate):
         "state": st.AWAITING_REVIEW,
         "book_path": book_path,
         "params": {
-            "naming": payload.naming,
-            "notitles": payload.notitles,
-            "exaggeration": payload.exaggeration,
-            "cfg_weight": payload.cfg_weight,
+            "naming": naming,
+            "notitles": notitles,
+            "exaggeration": exag,
+            "cfg_weight": cfg_w,
             "sample": sample_rel,
             "cover": "cover.png",
         },
@@ -281,35 +291,48 @@ async def api_job(job_id: str):
 
 
 @app.patch("/api/jobs/{job_id}/meta")
-async def api_update_meta(job_id: str, payload: MetaUpdate):
+async def api_update_meta(
+    job_id: str,
+    title: Optional[str] = Form(None),
+    author: Optional[str] = Form(None),
+    sample: Optional[str] = Form(None),
+    exaggeration: Optional[str] = Form(None),
+    cfg_weight: Optional[str] = Form(None),
+    notitles: Optional[str] = Form(None),
+):
     state = _job_or_404(job_id)
     if state["state"] not in (st.AWAITING_REVIEW, st.FAILED, st.CANCELLED):
         raise HTTPException(409, f"cannot edit job in state {state['state']}")
-    if payload.title is not None:
-        state["book"]["title"] = payload.title
-    if payload.author is not None:
-        state["book"]["author"] = payload.author
+    if title is not None:
+        state["book"]["title"] = title
+    if author is not None:
+        state["book"]["author"] = author
     params = state["params"]
-    if payload.sample is not None:
-        if payload.sample == "":
+    if sample is not None:
+        if sample == "":
             params["sample"] = None
         else:
-            path = _safe_data_path(payload.sample)
+            path = _safe_data_path(sample)
             if not os.path.isfile(path):
-                raise HTTPException(404, f"sample not found: {payload.sample}")
-            params["sample"] = payload.sample
-    if payload.exaggeration is not None:
-        params["exaggeration"] = payload.exaggeration
-    if payload.cfg_weight is not None:
-        params["cfg_weight"] = payload.cfg_weight
-    if payload.notitles is not None:
-        params["notitles"] = payload.notitles
+                raise HTTPException(404, f"sample not found: {sample}")
+            params["sample"] = sample
+    if exaggeration is not None and exaggeration != "":
+        params["exaggeration"] = float(exaggeration)
+    if cfg_weight is not None and cfg_weight != "":
+        params["cfg_weight"] = float(cfg_weight)
+    if notitles is not None:
+        params["notitles"] = notitles in ("true", "True", "1")
     st.write_state(DATA_ROOT, state)
     return {"saved": True}
 
 
 @app.patch("/api/jobs/{job_id}/chapters/{ord}")
-async def api_update_chapter(job_id: str, ord: int, payload: ChapterUpdate):
+async def api_update_chapter(
+    job_id: str,
+    ord: int,
+    title: Optional[str] = Form(None),
+    text: Optional[str] = Form(None),
+):
     state = _job_or_404(job_id)
     if state["state"] not in (st.AWAITING_REVIEW, st.FAILED, st.CANCELLED):
         raise HTTPException(409, f"cannot edit job in state {state['state']}")
@@ -317,11 +340,11 @@ async def api_update_chapter(job_id: str, ord: int, payload: ChapterUpdate):
     if not (1 <= ord <= len(chapters)):
         raise HTTPException(404, "chapter not found")
     ch = chapters[ord - 1]
-    if payload.title is not None:
-        ch["title"] = payload.title
-    if payload.text is not None:
-        ch["text"] = payload.text
-        ch["paragraphs"] = [p for p in payload.text.split("\n") if p.strip()]
+    if title is not None:
+        ch["title"] = title
+    if text is not None:
+        ch["text"] = text
+        ch["paragraphs"] = [p for p in text.split("\n") if p.strip()]
     # rebuild book.txt
     jdir = st.job_dir(DATA_ROOT, job_id)
     st.build_book_txt(jdir, state["book"]["title"], state["book"]["author"], chapters)

@@ -131,6 +131,16 @@
     used `location.href` for redirect (removed the `job-created` custom event).
   - Also improved error messages: extracts `detail` from the JSON error body
     instead of stringifying the whole response.
+- [x] **Bug: `"Failed to create job: Input should be a valid dictionary or object to extract fields from"`**
+  - Root cause: The form used `hx-encoding="json"` which causes HTMX to send
+    the body as a raw JSON string. However, FastAPI's `Form` parameters expect
+    `application/x-www-form-urlencoded` data. When the Content-Type was JSON
+    but the endpoint expected form data, Pydantic received the raw string
+    instead of a dict → "Input should be a valid dictionary".
+  - Fix: Removed `hx-encoding="json"` from the form in `home.html` so HTMX
+    sends standard `application/x-www-form-urlencoded` data (the default).
+  - **Verified:** `POST /api/jobs` with URL-encoded form data → 404 "book not found"
+    (expected, since test book doesn't exist on server) — no more 422 validation error.
 
 ### Container restart resilience + Dockerfile fix (2026-10-26)
 - [x] Updated `entrypoint-dev.sh` to auto-start the web server on container boot:
