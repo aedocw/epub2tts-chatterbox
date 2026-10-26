@@ -1,0 +1,42 @@
+# Dev container for epub2tts-chatterbox — use with Portainer or `docker compose`.
+#
+# Build first (from repo root):
+#   sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
+#
+# Then (Portainer: paste this file into a stack, or CLI):
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# SSH in:
+#   ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
+#       -o StrictHostKeyChecking=accept-new -p 2222 root@<host>
+
+services:
+  dev:
+    image: epub2tts-chatterbox-dev
+    container_name: epub2tts-chatterbox-dev
+    restart: unless-stopped
+
+    # --- GPU: only GPU 1 ---
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/root/.cache/huggingface
+
+    ports:
+      - "2222:22"
+
+    volumes:
+      # eBooks + jobs + samples
+      - /mnt/dm5/_ebook:/data
+      # Chatterbox model cache (persistent across container rebuilds)
+      - /mnt/models/epub2tts:/root/.cache/huggingface
+      # SSH keypair (read-only) — entrypoint wires .pub into authorized_keys
+      - /workspace/repos/keys/epub2tts:/root/.ssh:ro
