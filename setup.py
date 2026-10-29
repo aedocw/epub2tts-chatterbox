@@ -9,7 +9,7 @@ setup(
     author="Christopher Aedo aedo.dev",
     author_email="c@aedo.dev",
     url="https://github.com/aedocw/epub2tts-chatterbox",
-    license="GPL 3.0",
+    license="GPL-3.0-or-later",
     version="1.2.2",
     packages=find_packages(),
     install_requires=requirements,
