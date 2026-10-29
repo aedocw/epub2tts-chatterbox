@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}epub2tts-chatterbox{% endblock %}</title>
+<script>{{ htmx_src | safe }}</script>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --line:#2c313a; --text:#d7dae0;
+          --dim:#8b929e; --accent:#4da3ff; --ok:#57c785; --warn:#e0a93f; --err:#e06060; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  header { display:flex; gap:16px; align-items:center; padding:12px 20px;
+           background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  header nav { display:flex; gap:14px; margin-left:auto; }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+          padding:14px; }
+  .card .name { font-weight:600; word-break:break-all; }
+  .card .meta { color:var(--dim); font-size:13px; margin-top:6px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button, .btn { background:var(--accent); color:#fff; border:0; border-radius:6px;
+                 padding:7px 14px; font-size:14px; cursor:pointer; }
+  button:hover, .btn:hover { filter:brightness(1.1); }
+  button.danger { background:var(--err); }
+  button.warn { background:var(--warn); color:#111; }
+  button:disabled { opacity:.45; cursor:default; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; font-size:13px; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:10px; font-size:12px;
+           font-weight:600; background:#333a45; }
+  .badge.TRANSCRIBING { background:var(--accent); color:#fff; }
+  .badge.DONE { background:var(--ok); color:#08130c; }
+  .badge.FAILED { background:var(--err); color:#fff; }
+  .badge.CANCELLED { background:#5a6270; color:#fff; }
+  .badge.AWAITING_REVIEW { background:var(--warn); color:#111; }
+  .badge.ENCODING { background:var(--accent); color:#fff; }
+  .progress { background:#0f1115; border-radius:6px; height:22px; overflow:hidden;
+              position:relative; min-width:220px; }
+  .progress > div { background:var(--accent); height:100%; transition:width .8s; }
+  .progress > span { position:absolute; inset:0; display:flex; align-items:center;
+                     justify-content:center; font-size:12px; color:#fff; }
+  textarea, input[type=text], select { background:#0f1115; color:var(--text);
+      border:1px solid var(--line); border-radius:6px; padding:8px; font:inherit; width:100%; }
+  label { color:var(--dim); font-size:13px; display:block; margin-bottom:4px; }
+  .field { margin-bottom:12px; }
+  .ch { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+        padding:12px; margin-bottom:10px; }
+  .ch .ctitle { font-weight:600; margin-bottom:6px; }
+  .ch .ctext { color:var(--dim); font-size:13px; white-space:pre-wrap;
+               max-height:180px; overflow:auto; }
+  .error { color:var(--err); background:#2a1a1a; border:1px solid var(--err);
+           border-radius:6px; padding:10px; margin:10px 0; white-space:pre-wrap; }
+  .hint { color:var(--dim); font-size:13px; }
+  audio { width:100%; margin-top:8px; }
+  h2 { font-size:18px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<header>
+  <h1>📚 epub2tts-chatterbox</h1>
+  <nav>
+    <a href="/">New book</a>
+    <a href="/jobs">Jobs</a>
+  </nav>
+</header>
+<main class="wrap">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

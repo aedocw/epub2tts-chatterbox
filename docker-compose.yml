@@ -1,0 +1,48 @@
+# Production compose file for epub2tts-chatterbox (web UI + job supervisor).
+#
+# Build first (from repo root):
+#   docker build -t epub2tts-chatterbox:local .
+#
+# Then:
+#   docker compose up -d
+#
+# Web UI: http://<host>:8080
+#
+# Layout of the /data bind mount:
+#   /data/<book-folder>/*.epub   → browsable books (one folder per collection)
+#   /data/speaker/*.wav|mp3      → speaker samples for voice cloning
+#   /data/jobs/                  → created automatically (job dirs, outputs)
+#
+# The HuggingFace cache mount keeps the (~several GB) Chatterbox model on the
+# host so it survives container rebuilds and is downloaded only once.
+
+services:
+  epub2tts:
+    image: epub2tts-chatterbox:local
+    container_name: epub2tts-chatterbox
+    restart: unless-stopped
+
+    # GPU passthrough — use "all" for a single-GPU box, or pin a specific GPU:
+    #   deploy.resources.reservations.devices[0].device_ids: ["0"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["all"]
+              capabilities: [gpu]
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/root/.cache/huggingface
+      # Optional: EPUB2TTS_DATA=/data  (default, shown for clarity)
+
+    ports:
+      - "8080:8080"
+
+    volumes:
+      # eBooks + speaker samples + jobs
+      - /mnt/dm5/_ebook:/data
+      # Chatterbox model cache (persistent across container rebuilds)
+      - /mnt/models/epub2tts:/root/.cache/huggingface

@@ -1,4 +1,5 @@
 import os
+import glob
 import sys
 # Automatically enable MPS fallback on Apple Silicon macOS
 # But prob not, see https://github.com/resemble-ai/chatterbox/blob/master/example_for_mac.py
@@ -28,6 +29,19 @@ from epub2tts_chatterbox.epub_export import export
 warnings.filterwarnings("ignore")
 
 warnings.filterwarnings("ignore", module="ebooklib.epub")
+
+# Fixed silence-pruning filter (no adaptive logic). Chatterbox emits long
+# silences; this removes every silence >= 1.5 s (leaving ~20 ms residual).
+#  Verified on the installed ffmpeg (4.2.7):
+#   1 s tone + 1.6 s silence + 1 s tone  ->  2.02 s   (silence removed)
+#   2 s tone + 5 s silence + 2 s tone    ->  4.02 s   (silence removed)
+#   2 s tone + 2 s silence + 2 s tone    ->  4.02 s   (silence removed)
+#   1 s tone + 1.4 s silence + 1 s tone  ->  3.40 s   (below threshold, untouched)
+#   two 2 s gaps (7 s total)             ->  3.04 s   (both removed)
+# The 600 ms paragraph pauses are below 1.5 s and survive.  The 2 s
+# chapter-end pad is added AFTER this filter (apad) so it is never pruned.
+SILENCE_FILTER = "silenceremove=stop_periods=-1:stop_duration=1.5:stop_threshold=-50dB"
+CHAPTER_PAUSE_S = 2  # same as today's append_silence(files[-1], 2000)
 
 def ensure_punkt():
     try:
@@ -69,7 +83,6 @@ def get_book(sourcefile):
     book_contents = []
     book_title = sourcefile
     book_author = "Unknown"
-    chapter_titles = []
 
     with open(sourcefile, "r", encoding="utf-8") as file:
         current_chapter = {"title": "blank", "paragraphs": []}
@@ -95,13 +108,10 @@ def get_book(sourcefile):
                 chapter_title = line[1:].strip()
                 if any(c.isalnum() for c in chapter_title):
                     current_chapter["title"] = chapter_title
-                    chapter_titles.append(current_chapter["title"])
                 else:
                     current_chapter["title"] = "blank"
-                    chapter_titles.append("blank")
             elif line:
                 if not initialized_first_chapter:
-                    chapter_titles.append("blank")
                     initialized_first_chapter = True
                 if any(char.isalnum() for char in line):
                     sentences = sent_tokenize(line)
@@ -112,6 +122,11 @@ def get_book(sourcefile):
         # Append the last chapter if it contains any paragraphs.
         if current_chapter["paragraphs"]:
             book_contents.append(current_chapter)
+
+    # Titles are derived from the final chapter list (NOT from raw # lines),
+    # so a heading with no following paragraphs can never desync titles from
+    # parts (e.g. "# Part One" directly followed by "# Chapter 1").
+    chapter_titles = [c["title"] if c["title"] else "blank" for c in book_contents]
 
     return book_contents, book_title, book_author, chapter_titles
 
@@ -204,10 +219,15 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
             try:
                 # Suppress Chatterbox's internal per-sentence tqdm sampling bars
                 with contextlib.redirect_stderr(io.StringIO()):
+                    # inference_mode is always a win (lower memory + no autograd overhead).
+                    # bf16 autocast is only enabled for Ampere+ GPUs (see read_book);
+                    # on Pascal (1080/2080) we stay on the native fp32 path.
+                    precision = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_bf16 else contextlib.nullcontext()
                     if sample == "none":
-                        wav = model.generate(clean_sent)
+                        with torch.inference_mode(), precision:
+                            wav = model.generate(clean_sent)
                     else:
-                        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                        with torch.inference_mode(), precision:
                             wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
 
                 ta.save(filenames[i], wav, model.sr)
@@ -298,7 +318,12 @@ def combine_short_sentences(sentences, min_words=6, keep_threshold=8):
 
     return result
 
-def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
+def read_book(book_contents, sample, notitles, exaggeration, cfg_weight, prune=True):
+    # Remove stale temp files from an interrupted earlier run so they can
+    # never be picked up as finished checkpoints.
+    for stale in glob.glob("*.tmp.flac") + glob.glob("*.list.txt"):
+        os.remove(stale)
+
     # Automatically detect the best available device
     if torch.cuda.is_available():
         device = "cuda"
@@ -309,9 +334,22 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
     print(f"Attempting to use device: {device}")
     model = ChatterboxTTS.from_pretrained(device=device)
 
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cudnn.benchmark = True
+    # GPU-aware precision. bf16 tensor-core speedups only exist on Ampere
+    # (compute capability >= 8.0, e.g. 4060 Ti). Pascal cards (1080/2080,
+    # cc 6.1/7.5) have no native bf16 and terrible fp16 — plain fp32 is their
+    # fastest path, so we skip both bf16 autocast and TF32 there.
+    #   - TF32 flags are ignored (no harm) on pre-Ampere, but only useful on Ampere+.
+    #   - cudnn.benchmark is left off: TTS input shapes vary per sentence, so
+    #     autotuning re-runs constantly and can be net-negative.
+    use_bf16 = False
+    if device == "cuda" and torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability()
+        use_bf16 = major >= 8
+        if use_bf16:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        print(f"GPU compute capability: {major}.{minor}")
+        print(f"Using bf16 autocast: {use_bf16} (inference_mode: always)")
 
     # Initialize timing and progress tracking
     start_time = time.time()
@@ -363,14 +401,16 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
 
             with tqdm(total=total_sentences, desc=f"  {chapter['title'][:50]}", unit="sent", leave=True) as pbar:
                 for pindex, (paragraph, sentences) in enumerate(zip(combined_paragraphs, paragraph_sentences)):
-                    ptemp = f"pgraphs{pindex}.flac"
+                    # Chapter-scoped name: leftovers from one chapter can never be
+                    # picked up by another.
+                    ptemp = f"pgraphs_c{i:04d}_p{pindex:05d}.flac"
                     if os.path.isfile(ptemp):
                         pbar.update(len(sentences))  # advance past already-done paragraph
                     else:
                         filenames = [
                             "sntnc" + str(z) + ".wav" for z in range(len(sentences))
                         ]
-                        chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, pbar)
+                        chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, pbar, use_bf16)
                         append_silence(filenames[-1], paragraphpause)
                         # combine sentences in paragraph
                         sorted_files = sorted(filenames, key=sort_key)
@@ -389,12 +429,10 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
                         for file in sorted_files:
                             os.remove(file)
                     files.append(ptemp)
-            # combine paragraphs into chapter
-            append_silence(files[-1], 2000)
-            combined = AudioSegment.empty()
-            for file in files:
-                combined += AudioSegment.from_file(file)
-            combined.export(partname, format="flac")
+            # One streaming ffmpeg call: concat + fixed silence pruning +
+            # 2 s chapter-end pad. (Replaces the pydub assembly that decoded
+            # the whole chapter to raw PCM; peak RAM now stays flat.)
+            build_part(files, partname, prune=prune)
             for file in files:
                 os.remove(file)
             segments.append(partname)
@@ -403,28 +441,33 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
     return segments
 
 def generate_metadata(files, author, title, chapter_titles):
+    assert len(files) == len(chapter_titles), \
+        f"{len(files)} parts but {len(chapter_titles)} chapter titles"
     chap = 0
-    start_time = 0
-    with open("FFMETADATAFILE", "w") as file:
+    start_time = 0.0  # cumulative milliseconds, float
+    with open("FFMETADATAFILE", "w", encoding="utf-8") as file:
         file.write(";FFMETADATA1\n")
-        file.write(f"ARTIST={author}\n")
-        file.write(f"ALBUM={title}\n")
-        file.write(f"TITLE={title}\n")
+        file.write(f"ARTIST={escape_ffmeta(author)}\n")
+        file.write(f"ALBUM={escape_ffmeta(title)}\n")
+        file.write(f"TITLE={escape_ffmeta(title)}\n")
         file.write("DESCRIPTION=Made with https://github.com/aedocw/epub2tts-chatterbox\n")
         for file_name in files:
             duration = get_duration(file_name)
             file.write("[CHAPTER]\n")
             file.write("TIMEBASE=1/1000\n")
-            file.write(f"START={start_time}\n")
-            file.write(f"END={start_time + duration}\n")
-            file.write(f"title={chapter_titles[chap]}\n")
+            file.write(f"START={round(start_time)}\n")
+            file.write(f"END={round(start_time + duration)}\n")
+            file.write(f"title={escape_ffmeta(chapter_titles[chap])}\n")
             chap += 1
             start_time += duration
 
 def get_duration(file_path):
-    audio = AudioSegment.from_file(file_path)
-    duration_milliseconds = len(audio)
-    return duration_milliseconds
+    """Duration in milliseconds (float), via ffprobe (header-only, no decode)."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", file_path],
+        capture_output=True, text=True, check=True).stdout
+    return float(out) * 1000
 
 def make_m4b(files, sourcefile, speaker):
     filelist = "filelist.txt"
@@ -562,6 +605,11 @@ def main():
         help="Do not read chapter titles"
     )
     parser.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="Do not prune long silences from the audio (default: prune with a fixed ffmpeg filter)"
+    )
+    parser.add_argument(
         "--exaggeration",
         type=float,
         default=0.7,
@@ -600,7 +648,7 @@ def main():
         sample = args.sample
     else:
         sample = "none"
-    files = read_book(book_contents, sample, args.notitles, args.exaggeration, args.cfg_weight)
+    files = read_book(book_contents, sample, args.notitles, args.exaggeration, args.cfg_weight, prune=not args.no_prune)
     generate_metadata(files, book_author, book_title, chapter_titles)
     m4bfilename = make_m4b(files, args.sourcefile, sample)
     add_cover(args.cover, m4bfilename)

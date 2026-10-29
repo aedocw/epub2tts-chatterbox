@@ -1,0 +1,80 @@
+# Development image for epub2tts-chatterbox.
+#
+# Purpose: a single GPU container that the agent drives over SSH. No docker
+# socket is exposed to the agent — all development happens *inside* this
+# container (edit code in /app, run the server, tail logs).
+#
+# Differences vs. Dockerfile (production):
+#   - installs openssh-server
+#   - ENTRYPOINT runs /app/entrypoint-dev.sh (starts sshd + web server, stays alive)
+#   - web server auto-starts on :8080 (no manual start needed after restart)
+#
+# Build (manual, from repo root — includes web/ package):
+#   sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
+#
+# Run (GPU passthrough + /data bind mount + SSH keypair mount):
+#   sudo docker run -d --name epub2tts-chatterbox-dev \
+#     --gpus all \
+#     -e NVIDIA_VISIBLE_DEVICES=all \
+#     -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+#     -e HF_HOME=/root/.cache/huggingface \
+#     -v /mnt/models/epub2tts:/root/.cache/huggingface \
+#     -v /mnt/dm5/_ebook:/data \
+#     -v /workspace/repos/keys/epub2tts:/root/.ssh:ro \
+#     -p 2222:22 \
+#     -p 8080:8080 \
+#     epub2tts-chatterbox-dev
+#
+# SSH in (agent uses the private key; entrypoint auto-registers the public key):
+#   ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
+#     -o StrictHostKeyChecking=accept-new -p 2222 root@<host>
+
+# Use a base image with CUDA and Python
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
+
+# 1. Prevent interactive prompts (like tzdata) during build
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# 2. Install system dependencies non-interactively (adds openssh-server for dev SSH)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    espeak-ng \
+    tzdata \
+    openssh-server \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. SSH server configuration
+#    - host keys
+#    - allow root login (dev-only container, personal use)
+#    - pubkey auth on; the agent's public key is mounted at /root/.ssh (RO) and
+#      wired into authorized_keys by entrypoint-dev.sh at startup.
+#    - a root password is kept as a fallback.
+RUN mkdir -p /run/sshd \
+    && ssh-keygen -A \
+    && sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's|^#*AuthorizedKeysFile.*|AuthorizedKeysFile /etc/ssh/authorized_keys /root/.ssh/authorized_keys|' /etc/ssh/sshd_config \
+    && echo 'root:epub2tts' | chpasswd
+
+# Set working directory
+WORKDIR /app
+
+# Copy the local source (includes web/ package, entrypoint, everything)
+# Build from the repo root:  docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
+COPY . /app/
+
+# Install the package
+RUN pip install --no-cache-dir .
+
+# Make the dev entrypoint executable (starts sshd + web server, keeps container alive)
+RUN chmod +x /app/entrypoint-dev.sh
+
+# Create a volume mount point for books/output
+VOLUME /data
+
+EXPOSE 22 8080
+
+ENTRYPOINT ["/app/entrypoint-dev.sh"]

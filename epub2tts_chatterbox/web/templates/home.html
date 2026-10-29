@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}New book — epub2tts-chatterbox{% endblock %}
+{% block content %}
+
+<div class="row" style="margin-bottom:16px">
+  <h2>1. Pick a book</h2>
+  {% if running %}
+    <span class="hint">⚠ A job is transcribing right now (<a href="/jobs/{{ running }}">{{ running }}</a>) — new jobs will queue.</span>
+  {% endif %}
+</div>
+
+<form id="new-job" hx-post="/api/jobs"
+      hx-swap="none"
+      hx-on::after-request="
+        if (event.detail.successful) {
+          const data = JSON.parse(event.detail.xhr.responseText);
+          location.href = '/jobs/' + data.id;
+        } else {
+          let msg = 'Unknown error';
+          try {
+            const d = JSON.parse(event.detail.xhr.responseText).detail;
+            msg = Array.isArray(d) ? d.map(x => x.msg).join(', ') : String(d);
+          } catch(e) {}
+          alert('Failed to create job: ' + msg);
+        }">
+  <div class="field">
+    <label for="book">EPUB (from /data/books)</label>
+    <select name="book" id="book" required>
+      <option value="">— choose —</option>
+      {% for b in books %}
+      <option value="{{ b.name }}">{{ b.name }} ({{ (b.size / 1048576) | round(1) }} MB)</option>
+      {% endfor %}
+      {% if not books %}<option value="" disabled>— no books found in /data —</option>{% endif %}
+    </select>
+  </div>
+  <div class="row">
+    <div class="field" style="flex:1; min-width:220px">
+      <label for="sample">Voice sample (optional, /data/samples)</label>
+      <select name="sample" id="sample">
+        <option value="">— default voice —</option>
+        {% for s in samples %}
+        <option value="{{ s.rel }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field" style="min-width:130px">
+      <label for="naming">Chapter naming</label>
+      <select name="naming" id="naming">
+        <option value="auto" selected>auto</option>
+        <option value="toc">toc</option>
+        <option value="heading">heading</option>
+        <option value="class">class</option>
+        <option value="fallback">fallback</option>
+      </select>
+    </div>
+    <button type="submit" style="align-self:flex-end">Create job →</button>
+  </div>
+  <p class="hint">Creation extracts the book (a few seconds), then you review chapters before starting TTS.</p>
+</form>
+
+
+
+<h2 style="margin-top:32px">Recent jobs</h2>
+{% if jobs %}
+<table>
+  <tr><th>Job</th><th>State</th><th>Created</th><th></th></tr>
+  {% for j in jobs[:10] %}
+  <tr>
+    <td><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td>
+    <td><span class="badge {{ j.state }}">{{ j.state }}</span></td>
+    <td class="hint">{{ j.created_at }}</td>
+    <td>{% if j.state == 'DONE' %}<a href="/api/jobs/{{ j.id }}/audio">⬇ audio</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="hint">No jobs yet.</p>
+{% endif %}
+
+{% endblock %}

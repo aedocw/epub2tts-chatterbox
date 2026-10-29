@@ -10,3 +10,9 @@ pydub>=0.25.1
 setuptools>=69.0.0,<72
 soundfile>=0.13.1
 tqdm>=4.67.1
+
+# Web frontend (FastAPI app + job supervisor)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+jinja2>=3.1.0
+pydantic>=2.6.0

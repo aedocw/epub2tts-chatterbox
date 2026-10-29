@@ -1,0 +1,8 @@
+{% if progress %}
+<div class="progress" style="margin:12px 0">
+  <div style="width: {{ progress.pct }}%"></div>
+  <span>{{ progress.pct }}% — chapter {{ progress.chapter }}/{{ progress.chapters_total }}
+    {% if progress.eta_sec is not none %} · ETA {{ progress.eta_sec // 3600 }}h {{ (progress.eta_sec % 3600) // 60 }}m{% endif %}</span>
+</div>
+<pre class="hint" style="max-height:180px; overflow:auto">{{ progress.last_stdout }}</pre>
+{% endif %}

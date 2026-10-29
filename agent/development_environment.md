@@ -1,0 +1,158 @@
+# Development Environment — epub2tts-chatterbox
+
+> Quick-reference for connecting to and working inside the dev container.
+
+## SSH Connection
+
+```bash
+ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
+    -o StrictHostKeyChecking=accept-new \
+    -p 2222 root@192.168.0.3
+```
+
+| Field | Value |
+|-------|-------|
+| Host | `192.168.0.3` |
+| Port | `2222` |
+| User | `root` |
+| Private key | `/workspace/repos/keys/epub2tts/github-epub2tts` |
+| Auth | Public key (`.pub` auto-registered by entrypoint into `authorized_keys`) |
+
+> **Shortcut for every SSH command:** prefix with the `ssh -i … -p 2222 root@192.168.0.3` above.
+> No password needed.
+
+## Container Overview
+
+| Item | Detail |
+|------|--------|
+| Image | `epub2tts-chatterbox-dev` (built from `Dockerfile-dev`) |
+| Container name | `epub2tts-chatterbox-dev` |
+| GPU | **GTX 1080, 8 GB** (GPU index 1 on host) |
+| Base | `pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime` (actually ships **Python 3.10.13, torch 2.6.0+cu124**) |
+| Compose file | `docker-compose.dev.yml` (in repo root) |
+
+## Key Paths (inside container)
+
+| Path | Purpose |
+|------|---------|
+| `/app` | Git checkout of the repo (cloned at build time). Currently on `main`. For dev: `git fetch origin && git checkout dev && pip install -e .` |
+| `/data` | Bind mount → host `/mnt/dm5/_ebook`. Contains `books/`, `samples/`, `jobs/` subdirs (created by entrypoint) |
+| `/root/.cache/huggingface` | Chatterbox model cache (bind-mounted, persistent) |
+| `/root/.ssh` | Read-only mount of `/workspace/repos/keys/epub2tts` (git deploy key + SSH keypair) |
+| `/opt/conda/bin/python3` | **Python 3.10.13** — always use this absolute path |
+| `/opt/conda/bin/pip` | pip for the conda env |
+| `/data/speakers/sample2.wav` | Voice sample to use as speaker |
+| `/data/devel/` | **Testing directory** — use exclusively for ebook generation tests. Contains `sample3.wav` |
+
+## Testing Data
+
+- **Ebook source:** `/data` (bind mount from host `/mnt/dm5/_ebook`) — the user's full library.
+- **Speaker sample (production):** `/data/speakers/sample2.wav`
+- **Testing directory:** `/data/devel/` — contains `sample3.wav`.
+  > ⚠️ **For now, exclusively use `/data/devel/` for testing ebook generation.** Do not write job output to `/data/jobs/` or other dirs until explicitly told to.
+
+## Important Gotchas
+
+1. **`python` / `python3` are NOT on the default non-login PATH.**
+   Always use `/opt/conda/bin/python3` (and `/opt/conda/bin/pip`).
+   Or prefix with `source /opt/conda/etc/profile.d/conda.sh &&`.
+
+2. **No `which` command.** Use `command -v <cmd>` instead.
+
+3. **Git pager:** Set `GIT_PAGER=cat` or use `git --no-pager` to avoid interactive pager hangs in non-TTY sessions.
+
+4. **The container keeps alive via `tail -f /dev/null`** in `entrypoint-dev.sh`. Nothing auto-runs. You drive everything over SSH.
+
+5. **CWD-dependent output:** The CLI tool writes `partN.flac`, `pgraphsN.flac`, etc. to the **current working directory**. Always `cd` into the job dir before running TTS.
+
+6. **Model cache:** Chatterbox model (~GBs) is cached at `/root/.cache/huggingface`. First TTS run will download if missing.
+
+7. **The package is installed NON-editable** into
+   `/opt/conda/lib/python3.10/site-packages/epub2tts_chatterbox/` — **not** from `/app`.
+   When you run from `/data/devel` (or anywhere outside `/app`), Python loads the
+   site-packages copy, **not** `/app/epub2tts_chatterbox/`. To test a changed Python file,
+   copy it to `site-packages/epub2tts_chatterbox/epub2tts_chatterbox.py` and clear the stale
+   `__pycache__/epub2tts_chatterbox.*` first. (Running with `cwd=/app` would use `/app`'s copy
+   because the script dir is prepended to `sys.path`, but that's fragile.)
+
+## Git / Push (agent workspace → GitHub)
+
+- Remote: `git@github.com:rejuce/epub2tts-chatterbox.git` (SSH)
+- Working branch: `dev`
+- Deploy key: `/workspace/repos/keys/epub2tts/github-epub2tts` (repo copy) — also present
+  as `~/.ssh/id_github_epub2tts` in the agent environment.
+
+> ⚠️ **A plain `git push` FAILS with `Permission denied (publickey)`** — the default SSH
+> key/agent in the agent environment is *not* the GitHub deploy key. Always push with
+> the explicit key:
+>
+> ```bash
+> GIT_SSH_COMMAND="ssh -i ~/.ssh/id_github_epub2tts -o StrictHostKeyChecking=accept-new" \
+>   git push origin dev
+> ```
+
+### Reset procedure (if the OpenTerminal / agent container disappeared)
+
+The key survives in the **host workspace** (outside the agent container), so recovery is trivial:
+
+```bash
+# 1. Repo is at /workspace/repos/epub2tts-chatterbox (host mount — survives resets)
+# 2. Restore the push key into the (fresh) agent environment:
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cp /workspace/repos/keys/epub2tts/github-epub2tts ~/.ssh/id_github_epub2tts
+chmod 600 ~/.ssh/id_github_epub2tts
+# 3. Push with the explicit key (see command above)
+```
+
+- **Never** set repo-level `core.sshCommand` or add the key to an SSH agent persistently —
+  the env-var form above is sufficient and leaves no config behind.
+- Verified working: push `cafb0a9..c091e22 dev -> dev` (2026-10-29) using exactly this command.
+
+## System Tools Available
+
+| Tool | Path |
+|------|------|
+| ffmpeg | `/usr/bin/ffmpeg` |
+| espeak-ng | `/usr/bin/espeak-ng` |
+| git | `/usr/bin/git` |
+| nvidia-smi | `/usr/bin/nvidia-smi` |
+
+## Docker Build / Run (manual, on host)
+
+```bash
+# Build (from repo root, on branch dev)
+sudo docker build -f Dockerfile-dev -t epub2tts-chatterbox-dev .
+
+# Run (or use docker-compose.dev.yml via Portainer)
+sudo docker run -d --name epub2tts-chatterbox-dev \
+  --gpus all \
+  -e NVIDIA_VISIBLE_DEVICES=1 \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  -e HF_HOME=/root/.cache/huggingface \
+  -v /mnt/models/epub2tts:/root/.cache/huggingface \
+  -v /mnt/dm5/_ebook:/data \
+  -v /workspace/repos/keys/epub2tts:/root/.ssh:ro \
+  -p 2222:22 \
+  epub2tts-chatterbox-dev
+```
+
+## Typical Dev Session Flow
+
+```bash
+# 1. SSH in
+ssh -i /workspace/repos/keys/epub2tts/github-epub2tts -p 2222 root@192.168.0.3
+
+# 2. Get to dev branch in /app
+cd /app
+git fetch origin
+git checkout dev
+pip install -e .
+
+# 3. Work (edit files, run server, test, etc.)
+/opt/conda/bin/python3 -m uvicorn epub2tts_chatterbox.web:app --host 0.0.0.0 --port 8080
+
+# 4. Commit + push (from the agent side, or inside container with the key)
+git add -A && git commit -m "..."
+GIT_SSH_COMMAND="ssh -i /root/.ssh/github-epub2tts -o StrictHostKeyChecking=accept-new" \
+  git push origin dev
+```
