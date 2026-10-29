@@ -5,52 +5,27 @@ import sys
 if sys.platform == 'darwin':
     os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 import argparse
-import time
-import numpy as np
+import contextlib
+import io
 import re
-import soundfile
 import subprocess
+import time
 import torch
 import warnings
-from tqdm import tqdm
 import torchaudio as ta
+from tqdm import tqdm
 from chatterbox.tts import ChatterboxTTS
 
-from bs4 import BeautifulSoup
-import ebooklib
 from ebooklib import epub
-import soundfile as sf
-from lxml import etree
 from mutagen import mp4
 import nltk
 from nltk.tokenize import sent_tokenize
-from PIL import Image
 from pydub import AudioSegment
-import zipfile
-import warnings
 
 # Import EPUB export functions from the reusable library module
-from epub2tts_chatterbox.epub_export import (
-    export_epub,
-    export_epub_to_dict,
-    build_toc_map,
-    get_chapter_titles_by_method,
-    extract_chapter_content,
-    get_epub_cover,
-    preview_chapter_names,
-    export,
-)
+from epub2tts_chatterbox.epub_export import export
 
 warnings.filterwarnings("ignore")
-
-namespaces = {
-   "calibre":"http://calibre.kovidgoyal.net/2009/metadata",
-   "dc":"http://purl.org/dc/elements/1.1/",
-   "dcterms":"http://purl.org/dc/terms/",
-   "opf":"http://www.idpf.org/2007/opf",
-   "u":"urn:oasis:names:tc:opendocument:xmlns:container",
-   "xsi":"http://www.w3.org/2001/XMLSchema-instance",
-}
 
 warnings.filterwarnings("ignore", module="ebooklib.epub")
 
@@ -167,22 +142,73 @@ def append_silence(tempfile, duration=1200):
     # Save the combined audio back to file
     combined.export(tempfile, format="flac")
 
-def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight):
+def move_model_to_device(model, device):
+    """
+    Move a ChatterboxTTS model between devices.
+
+    ChatterboxTTS is not an nn.Module - it is a container holding three
+    submodules plus a device string that generate() uses to place its inputs -
+    so each piece has to be moved by hand.
+    """
+    model.t3.to(device)
+    model.s3gen.to(device)
+    model.ve.to(device)
+    if model.conds is not None:
+        model.conds.to(device)
+    model.device = device
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return model
+
+
+def wait_for_priority_process(model=None, script_path="/home/doc/repos/call-handling/check_missing_calls.py"):
+    """
+    Pause generation while the call transcription script is running.
+
+    The GPU is shared with that script and it needs several GB to transcribe,
+    so simply idling here is not enough - this process would keep its weights
+    resident and starve it. While waiting, the model is parked on the CPU and
+    its VRAM handed back, then restored once the priority process is done.
+    """
+    original_device = None
+    try:
+        while True:
+            result = subprocess.run(["pgrep", "-f", script_path], capture_output=True)
+            if result.returncode != 0:
+                break
+
+            if model is not None and original_device is None:
+                original_device = model.device
+                try:
+                    print("Priority process detected, moving model to CPU to free GPU memory...")
+                    move_model_to_device(model, "cpu")
+                except Exception as e:
+                    print(f"Could not move model to CPU: {e}")
+                    original_device = None
+
+            print(f"Waiting for priority process ({script_path}) to finish...")
+            time.sleep(30)
+    finally:
+        if original_device is not None:
+            print(f"Priority process finished, moving model back to {original_device}...")
+            move_model_to_device(model, original_device)
+
+
+def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, progress_bar=None):
     for i, sent in enumerate(sentences):
+        wait_for_priority_process(model)
         clean_sent = conditional_sentence_case(sent.strip())
         max_attempts = 3
         # This "try 3 times" loop is probably not needed, actual failure was from a torch recursive error that was fixed
         for attempt in range(1, max_attempts + 1):
             try:
-                if sample == "none":
-                    #print(f"Generating audio for sentence: {clean_sent}")
-                    wav = model.generate(clean_sent)
-                else:
-                    #print(f"Generating audio for sentence: {clean_sent}")
-                    # generate(self, text, repetition_penalty=1.2, min_p=0.05, top_p=1.0, audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5, temperature=0.8)
-                    wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
-                
-                #print(f"Saving audio to {filenames[i]}")
+                # Suppress Chatterbox's internal per-sentence tqdm sampling bars
+                with contextlib.redirect_stderr(io.StringIO()):
+                    if sample == "none":
+                        wav = model.generate(clean_sent)
+                    else:
+                        wav = model.generate(clean_sent, audio_prompt_path=sample, exaggeration=exaggeration, cfg_weight=cfg_weight)
+
                 ta.save(filenames[i], wav, model.sr)
                 # confirm the file was created
                 if not os.path.isfile(filenames[i]):
@@ -194,6 +220,9 @@ def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weigh
                     print(f"Attempt {attempt} failed for sentence '{clean_sent}': {e} -- Retrying...")
                 else:
                     print(f"Failed to process sentence '{clean_sent}' after {max_attempts} attempts. Error: {e}")
+
+        if progress_bar is not None:
+            progress_bar.update(1)
 
 def combine_short_paragraphs(paragraphs, min_words=6):
     """
@@ -276,7 +305,6 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
         device = "mps"
     else:
         device = "cpu"
-    current_device = torch.device(device)
     print(f"Attempting to use device: {device}")
     model = ChatterboxTTS.from_pretrained(device=device)
 
@@ -290,7 +318,7 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
         paragraphpause = 600  # default pause between paragraphs in ms
         files = []
         partname = f"part{i}.flac"
-        print(f"\n\n")
+        print("\n\n")
 
         if os.path.isfile(partname):
             print(f"{partname} exists, skipping to next chapter")
@@ -313,7 +341,6 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
                 timing_info = f" | Elapsed: {elapsed_str}"
 
             print(f"Chapter ({i}/{len(book_contents)}): {chapter['title']}{timing_info}\n")
-            print(f"Section name: \"{chapter['title']}\"")
             if chapter["title"] == "":
                 chapter["title"] = "blank"
             if chapter["title"] != "Title" and notitles != True:
@@ -322,38 +349,41 @@ def read_book(book_contents, sample, notitles, exaggeration, cfg_weight):
             # Combine short paragraphs first
             combined_paragraphs = combine_short_paragraphs(chapter["paragraphs"])
 
-            for pindex, paragraph in enumerate(combined_paragraphs):
-                ptemp = f"pgraphs{pindex}.flac"
-                if os.path.isfile(ptemp):
-                    print(f"{ptemp} exists, skipping to next paragraph")
-                else:
-                    sentences = sent_tokenize(paragraph)
-                    # Combine short sentences within the paragraph
-                    sentences = combine_short_sentences(sentences)
-                    filenames = [
-                        "sntnc" + str(z) + ".wav" for z in range(len(sentences))
-                    ]
-                    chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight)
-                    append_silence(filenames[-1], paragraphpause)
-                    # combine sentences in paragraph
-                    sorted_files = sorted(filenames, key=sort_key)
-                    #if os.path.exists("sntnc0.wav"):
-                    #    sorted_files.insert(0, "sntnc0.wav")
-                    combined = AudioSegment.empty()
-                    for file in sorted_files:
-                        # try/except prob not needed, actual failure was from a torch recursive error that was fixed
-                        try:
-                            combined += AudioSegment.from_file(file)
-                        except:
-                            print("FAILURE at sorted file combine")
-                            print(f"File: {file}")
-                            print(f"sorted files: {sorted_files}")
-                            print(f"Unsorted: {filenames}")
-                            sys.exit()
-                    combined.export(ptemp, format="flac")
-                    for file in sorted_files:
-                        os.remove(file)
-                files.append(ptemp)
+            # Pre-calculate sentences per paragraph for accurate progress tracking
+            paragraph_sentences = [
+                combine_short_sentences(sent_tokenize(p))
+                for p in combined_paragraphs
+            ]
+            total_sentences = sum(len(s) for s in paragraph_sentences)
+
+            with tqdm(total=total_sentences, desc=f"  {chapter['title'][:50]}", unit="sent", leave=True) as pbar:
+                for pindex, (paragraph, sentences) in enumerate(zip(combined_paragraphs, paragraph_sentences)):
+                    ptemp = f"pgraphs{pindex}.flac"
+                    if os.path.isfile(ptemp):
+                        pbar.update(len(sentences))  # advance past already-done paragraph
+                    else:
+                        filenames = [
+                            "sntnc" + str(z) + ".wav" for z in range(len(sentences))
+                        ]
+                        chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, pbar)
+                        append_silence(filenames[-1], paragraphpause)
+                        # combine sentences in paragraph
+                        sorted_files = sorted(filenames, key=sort_key)
+                        combined = AudioSegment.empty()
+                        for file in sorted_files:
+                            # try/except prob not needed, actual failure was from a torch recursive error that was fixed
+                            try:
+                                combined += AudioSegment.from_file(file)
+                            except Exception as e:
+                                print("FAILURE at sorted file combine")
+                                print(f"File: {file}")
+                                print(f"sorted files: {sorted_files}")
+                                print(f"Unsorted: {filenames}")
+                                sys.exit()
+                        combined.export(ptemp, format="flac")
+                        for file in sorted_files:
+                            os.remove(file)
+                    files.append(ptemp)
             # combine paragraphs into chapter
             append_silence(files[-1], 2000)
             combined = AudioSegment.empty()
@@ -396,7 +426,8 @@ def make_m4b(files, sourcefile, speaker):
     speaker_file = os.path.basename(speaker)
     basefile = sourcefile.replace(".txt", "")
     outputm4a = f"{basefile}.m4a"
-    outputm4b = f"{basefile} ({speaker_file.split('.wav')[0]}).m4b"
+    speaker_name = os.path.splitext(speaker_file)[0]
+    outputm4b = f"{basefile} ({speaker_name}).m4b"
     with open(filelist, "w") as f:
         for filename in files:
             filename = filename.replace("'", "'\\''")
@@ -439,16 +470,19 @@ def make_m4b(files, sourcefile, speaker):
     return outputm4b
 
 def add_cover(cover_img, filename):
+    if not cover_img:
+        return
     try:
         if os.path.isfile(cover_img):
             m4b = mp4.MP4(filename)
-            cover_image = open(cover_img, "rb").read()
+            with open(cover_img, "rb") as f:
+                cover_image = f.read()
             m4b["covr"] = [mp4.MP4Cover(cover_image)]
             m4b.save()
         else:
             print(f"Cover image {cover_img} not found")
-    except:
-        print(f"Cover image {cover_img} not found")
+    except Exception as e:
+        print(f"Failed to add cover image {cover_img}: {e}")
 
 def validate_text_file(sourcefile, book_title, book_author, book_contents):
     """
@@ -551,7 +585,7 @@ def main():
     if args.sourcefile.endswith(".epub"):
         book = epub.read_epub(args.sourcefile)
         export(book, args.sourcefile, naming_method=args.naming)
-        exit()
+        sys.exit()
 
     book_contents, book_title, book_author, chapter_titles = get_book(args.sourcefile)
 

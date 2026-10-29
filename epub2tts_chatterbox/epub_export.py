@@ -22,7 +22,6 @@ import os
 import re
 import warnings
 import zipfile
-from io import BytesIO
 
 from bs4 import BeautifulSoup
 import ebooklib
@@ -250,10 +249,10 @@ def preview_chapter_names(book, sourcefile=None, max_samples=6):
 
     # Collect sample chapters with content
     samples = []
-    for id in spine_ids:
+    for spine_id in spine_ids:
         if len(samples) >= max_samples:
             break
-        item = items.get(id)
+        item = items.get(spine_id)
         if item is None:
             continue
 
@@ -265,7 +264,7 @@ def preview_chapter_names(book, sourcefile=None, max_samples=6):
         titles = get_chapter_titles_by_method(
             item.get_content(),
             item_name=item.get_name(),
-            item_id=id,
+            item_id=spine_id,
             toc_map=toc_map
         )
         samples.append(titles)
@@ -402,15 +401,15 @@ def export_epub_to_dict(epub_path, naming_method=None, verbose=True, interactive
     items = {item.get_id(): item for item in book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT}
 
     chapters = []
-    for id in spine_ids:
-        item = items.get(id)
+    for spine_id in spine_ids:
+        item = items.get(spine_id)
         if item is None:
             continue
 
         chapter_title, paragraphs = extract_chapter_content(
             item.get_content(),
             item_name=item.get_name(),
-            item_id=id,
+            item_id=spine_id,
             toc_map=toc_map,
             naming_method=naming_method,
             verbose=verbose
@@ -449,7 +448,7 @@ def export_epub(epub_path, output_path=None, naming_method=None, verbose=True, i
         dict: Same as export_epub_to_dict()
     """
     if output_path is None:
-        output_path = epub_path.replace('.epub', '.txt')
+        output_path = os.path.splitext(epub_path)[0] + '.txt'
 
     # Get book data
     book_data = export_epub_to_dict(
@@ -476,7 +475,7 @@ def export_epub(epub_path, output_path=None, naming_method=None, verbose=True, i
 
     # Save cover image if available
     if book_data['cover_image']:
-        cover_path = epub_path.replace('.epub', '.png')
+        cover_path = os.path.splitext(epub_path)[0] + '.png'
         book_data['cover_image'].save(cover_path)
         if verbose:
             print(f"Cover image saved to {cover_path}")

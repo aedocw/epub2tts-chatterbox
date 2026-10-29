@@ -1,4 +1,4 @@
-> epub2tts-chatterbox is a free and open source python app to easily create a full-featured audiobook from an epub or text file using realistic voice-cloning text-to-speech by [Chatterbox](https://github.com/resemble-ai/chatterbox). CUDA compatible GPU is required, or Apple silicone.
+> epub2tts-chatterbox is a free and open source python app to easily create a full-featured audiobook from an epub or text file using realistic voice-cloning text-to-speech by [Chatterbox](https://github.com/resemble-ai/chatterbox). CUDA compatible GPU is required, or Apple silicon.
 
 ## 🚀 Features
 
@@ -15,7 +15,7 @@
 
 *NOTE:* If you want to specify where NLTK tokenizer will be stored (about 50mb), use an environment variable: `export NLTK_DATA="your/path/to/nltk_data"`
 
-## OPTIONAL - activate the virutal environment if using
+## OPTIONAL - activate the virtual environment if using
 1. `source .venv/bin/activate`
 
 ## FIRST - extract epub contents to text and cover image to png:
@@ -55,7 +55,7 @@ If you've found something new, please open an issue and be sure to include:
 <details>
 <summary>Release notes </summary>
 
-* 20250224: Changed to read individual setences rather than entire paragraph, for reading speed consistency
+* 20250224: Changed to read individual sentences rather than entire paragraph, for reading speed consistency
 * 20250221: Added `--notitles` option
 * 20250216: Initial release
 
@@ -63,7 +63,7 @@ If you've found something new, please open an issue and be sure to include:
 
 ## 📦 Install
 
-Required Python version is 3.11.
+Required Python version is 3.12.
 
 *NOTE:* If you want to specify where NLTK tokenizer will be stored (about 50mb), use an environment variable: `export NLTK_DATA="your/path/to/nltk_data"`
 
@@ -89,7 +89,7 @@ pip install .
 <details>
 <summary>LINUX INSTALLATION</summary>
 
-These instructions are for Ubuntu 24.04.1 LTS and 22.04  (20.04 showed some depedency issues), but should work (with appropriate package installer mods) for just about any distro. Ensure you have `ffmpeg` installed before use.
+These instructions are for Ubuntu 24.04.1 LTS and 22.04  (20.04 showed some dependency issues), but should work (with appropriate package installer mods) for just about any distro. Ensure you have `ffmpeg` installed before use.
 
 ```
 #install dependencies
@@ -107,7 +107,7 @@ pip install .
 <details>
 <summary>WINDOWS INSTALLATION</summary>
 
-Running epub2tts in WSL2 with Ubuntu 22 is the easiest approach, but these steps should work for running directly in windows.
+Running epub2tts-chatterbox in WSL2 with Ubuntu 22 is the easiest approach, but these steps should work for running directly in windows.
 
 (TBD)
 
