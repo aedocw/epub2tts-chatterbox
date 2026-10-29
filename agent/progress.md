@@ -42,9 +42,18 @@
 - `docker-compose.yml` (new)
 - `agent/outline.md`, `agent/progress.md`
 
+### Push + docs follow-up (2026-10-29)
+- Committed `c091e22` and pushed to `origin/dev` (`cafb0a9..c091e22`).
+- Plain `git push` failed (`Permission denied (publickey)`) — the agent env's default
+  SSH key is not the GitHub deploy key. Pushed successfully with:
+  `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_github_epub2tts -o StrictHostKeyChecking=accept-new" git push origin dev`
+- Documented this in `agent/development_environment.md` **Git / Push** section, incl. a
+  **reset procedure** for when the OpenTerminal/agent container disappears (key survives in
+  host workspace at `/workspace/repos/keys/epub2tts/github-epub2tts`; copy to
+  `~/.ssh/id_github_epub2tts` + chmod 600, then push with the env-var form). Also saved to memory.
+
 ### Next
 - Proper testing of the app (user's stated next phase)
-- Commit to `dev` when approved
 
 ---
 

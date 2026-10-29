@@ -75,17 +75,38 @@ ssh -i /workspace/repos/keys/epub2tts/github-epub2tts \
    `__pycache__/epub2tts_chatterbox.*` first. (Running with `cwd=/app` would use `/app`'s copy
    because the script dir is prepended to `sys.path`, but that's fragile.)
 
-## Git / Push
+## Git / Push (agent workspace → GitHub)
 
 - Remote: `git@github.com:rejuce/epub2tts-chatterbox.git` (SSH)
-- Deploy key for push: `/workspace/repos/keys/epub2tts/github-epub2tts`
-  - Also copied to `~/.ssh/id_github_epub2tts` in the agent environment
-- Push command:
-  ```bash
-  GIT_SSH_COMMAND="ssh -i ~/.ssh/id_github_epub2tts -o StrictHostKeyChecking=accept-new" \
-    git push origin dev
-  ```
 - Working branch: `dev`
+- Deploy key: `/workspace/repos/keys/epub2tts/github-epub2tts` (repo copy) — also present
+  as `~/.ssh/id_github_epub2tts` in the agent environment.
+
+> ⚠️ **A plain `git push` FAILS with `Permission denied (publickey)`** — the default SSH
+> key/agent in the agent environment is *not* the GitHub deploy key. Always push with
+> the explicit key:
+>
+> ```bash
+> GIT_SSH_COMMAND="ssh -i ~/.ssh/id_github_epub2tts -o StrictHostKeyChecking=accept-new" \
+>   git push origin dev
+> ```
+
+### Reset procedure (if the OpenTerminal / agent container disappeared)
+
+The key survives in the **host workspace** (outside the agent container), so recovery is trivial:
+
+```bash
+# 1. Repo is at /workspace/repos/epub2tts-chatterbox (host mount — survives resets)
+# 2. Restore the push key into the (fresh) agent environment:
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cp /workspace/repos/keys/epub2tts/github-epub2tts ~/.ssh/id_github_epub2tts
+chmod 600 ~/.ssh/id_github_epub2tts
+# 3. Push with the explicit key (see command above)
+```
+
+- **Never** set repo-level `core.sshCommand` or add the key to an SSH agent persistently —
+  the env-var form above is sufficient and leaves no config behind.
+- Verified working: push `cafb0a9..c091e22 dev -> dev` (2026-10-29) using exactly this command.
 
 ## System Tools Available
 
