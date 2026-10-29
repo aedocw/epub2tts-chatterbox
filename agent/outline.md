@@ -275,13 +275,26 @@ AWAITING_REVIEW → TRANSCRIBING → DONE
 | `GET` | `/api/jobs/{id}/cover` | Cover image (404 if none) |
 | `GET` | `/api/jobs/{id}/book.txt` | Text content |
 | `GET` | `/api/jobs/{id}/events` | SSE stream for live progress |
-| `DELETE` | `/api/jobs/{id}` | Delete job dir |
+| `DELETE` | `/api/jobs/{id}` | Delete job dir (409 if TRANSCRIBING/ENCODING; removes ALL contents incl. partN/pgraphs .flac, logs, m4b) |
 
 ### Pages (Jinja2 + HTMX)
 
 - `/` — Home: book browser, sample picker, create-job form
 - `/jobs` — Job list with status badges
 - `/jobs/{id}` — Job detail: progress bar, chapter list, start/cancel/download buttons, SSE auto-refresh
+
+### Delete / cleanup
+
+- The frontend **Delete job** buttons (job detail: all states; jobs list: all rows
+  except running) call `hx-delete /api/jobs/{id}`. (2026-10-29 bugfix: the
+  AWAITING_REVIEW/FAILED/CANCELLED buttons previously posted to `/cancel` and did
+  nothing — jobs were undeletable after cancellation.)
+- Deleting a job removes the **entire job dir** (`shutil.rmtree`, with a
+  verification pass — 500 instead of silent failure if files survive). Since the
+  CLI subprocess runs with `cwd=job_dir`, all intermediates live there and are
+  cleaned up automatically: `partN.flac`, `pgraphs_*.flac`, `sntnc*.wav`,
+  `book.txt`, `state.json`, `progress.json`, `stdout.log`, `error.txt`, `*.m4b`.
+- Delete is refused (409) for `TRANSCRIBING`/`ENCODING` jobs — cancel first.
 
 ### Key implementation details
 

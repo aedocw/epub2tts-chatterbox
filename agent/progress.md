@@ -1,5 +1,64 @@
 # Progress Log
 
+## 2026-10-29 — Job delete button actually deletes (frontend bug) ✅
+
+### Problem
+- The **Delete job** buttons on the job detail page (AWAITING_REVIEW / FAILED / CANCELLED
+  states) and the cancel-button in those states all pointed at
+  `hx-post /api/jobs/{id}/cancel`. For non-running jobs the cancel endpoint either
+  marked the job CANCELLED (AWAITING_REVIEW) or returned 409 (CANCELLED/FAILED) —
+  so clicking Delete on a CANCELLED job appeared to do nothing and jobs could never
+  be removed after cancellation.
+- Only the DONE-state button correctly used `hx-delete /api/jobs/{id}`.
+
+### Root cause
+Template wiring bug — the DELETE API (`DELETE /api/jobs/{id}` → `shutil.rmtree` of the
+job dir) already existed and already removes **all** job-dir contents (state.json,
+book.txt, `partN.flac`, `pgraphs*.flac`, `sntnc*.wav`, stdout.log, error.txt, .m4b —
+the CLI runs with `cwd=job_dir`, so every intermediate lives in the job dir). The
+buttons just never called it.
+
+### Fix (no new cleanup logic needed — rmtree of job dir covers all intermediates)
+1. **`web/templates/job.html`** — all four Delete buttons now use
+   `hx-delete=/api/jobs/{{id}}` + `hx-swap="none"` + `hx-confirm` + redirect to
+   `/jobs` on success (page no longer exists after delete).
+2. **`web/templates/jobs.html`** — added a 🗑 delete button per row (hidden for
+   TRANSCRIBING/ENCODING jobs) so jobs can be removed directly from the list.
+3. **`web/app.py`** — `DELETE /api/jobs/{id}`:
+   - 409 guard extended to `TRANSCRIBING` **and** `ENCODING` (was TRANSCRIBING only);
+   - extracted `_delete_job_dir()` helper: `rmtree(ignore_errors=True)` then a
+     verification pass — if the dir still exists (stragglers from `ignore_errors`),
+     retry without `ignore_errors` and return 500 with the OS error instead of
+     silently pretending success.
+
+### Validation
+- `py_compile` + Jinja2 parse of both templates: OK.
+- TestClient with temp `EPUB2TTS_DATA`:
+  - `DELETE` on CANCELLED job with `part1/part2/pgraphs/sntnc/stdout.log/m4b` files
+    → 200 `{'deleted': ...}`, **job dir gone including all partial .flac files**.
+  - `DELETE` on TRANSCRIBING job → 409 "cancel the job first".
+  - `DELETE` on unknown id → 404.
+  - grep: no remaining `hx-post .../cancel` Delete buttons; 4× `hx-delete` in
+    job.html, 1× in jobs.html.
+
+### Files changed
+- `epub2tts_chatterbox/web/app.py`
+- `epub2tts_chatterbox/web/templates/job.html`
+- `epub2tts_chatterbox/web/templates/jobs.html`
+
+### Deployment (2026-10-29)
+- Uploaded 3 files via SFTP to `192.168.0.3:2222` → `/app/epub2tts_chatterbox/web/`
+- Killed old uvicorn (PID 922), started new (PID 6332) via `setsid` + nohup
+- Verified: `GET /jobs` → HTTP 200, **6 delete buttons** rendered (one per job row)
+- All 6 existing jobs visible: 3× CANCELLED, 1× FAILED, 1× DONE, 1× (other)
+- Note: container has no `curl`; use `/opt/conda/bin/python3` for HTTP testing
+
+### Next
+- [ ] Browser click-test: delete a CANCELLED job, verify dir + .flac files gone
+- [ ] Commit (awaiting approval)
+
+---
+
 ## 2026-10-29 — Bounded-memory chapter build + fixed silence pruning ✅
 
 ### Problem

@@ -21,6 +21,11 @@
     <td>
       {% if j.state == 'DONE' %}<a href="/api/jobs/{{ j.id }}/audio">⬇ m4b</a>
       {% endif %}
+      {% if j.state not in ('TRANSCRIBING', 'ENCODING') %}
+      <button class="danger" hx-delete="/api/jobs/{{ j.id }}" hx-swap="none"
+              hx-confirm="Delete job {{ j.id }} (removes checkpoints)?"
+              hx-on::after-request="if(event.detail.successful) location.reload()">🗑</button>
+      {% endif %}
     </td>
   </tr>
   {% endfor %}

@@ -429,6 +429,18 @@ async def api_cancel_job(job_id: str):
         raise HTTPException(409, f"cannot cancel job in state {state['state']}")
 
 
+def _delete_job_dir(job_id: str) -> dict:
+    """Remove a job dir (state + book.txt + partN/pgraphsN .flac + logs + output)."""
+    jdir = st.job_dir(DATA_ROOT, job_id)
+    shutil.rmtree(jdir, ignore_errors=True)
+    if os.path.isdir(jdir):  # rmtree with ignore_errors can silently leave stragglers
+        try:
+            shutil.rmtree(jdir)
+        except OSError as e:
+            raise HTTPException(500, f"could not fully delete job dir: {e}")
+    return {"deleted": job_id}
+
+
 @app.get("/api/jobs/{job_id}/events")
 async def api_job_events(job_id: str):
     _job_or_404(job_id)
@@ -481,10 +493,9 @@ async def api_job_book_txt(job_id: str):
 @app.delete("/api/jobs/{job_id}")
 async def api_delete_job(job_id: str):
     state = _job_or_404(job_id)
-    if state["state"] == st.TRANSCRIBING:
+    if state["state"] in (st.TRANSCRIBING, st.ENCODING):
         raise HTTPException(409, "cancel the job first")
-    jdir = st.job_dir(DATA_ROOT, job_id)
-    shutil.rmtree(jdir, ignore_errors=True)
+    _delete_job_dir(job_id)
     return {"deleted": job_id}
 
 

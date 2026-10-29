@@ -101,9 +101,10 @@ then hit Start. The file is re-read on start.</p>
           hx-confirm="Start transcription? This can take hours/days and blocks the GPU."
           hx-on::after-request="if(event.detail.successful) location.reload()">
     ▶ Start transcription</button>
-  <button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-swap="none"
+  <button class="danger" hx-delete="/api/jobs/{{ job.id }}" hx-swap="none"
           hx-confirm="Delete this job?"
-          hx-on::after-request="if(event.detail.successful) location.reload()">Delete job</button>
+          hx-on::after-request="if(event.detail.successful) location.href='/jobs'">
+    🗑 Delete job</button>
 </div>
 <script>
 htmx.on('meta-saved', () => {
@@ -120,8 +121,10 @@ htmx.on('meta-saved', () => {
         hx-confirm="Resume? Finished chapters (part*.flac) are skipped."
         hx-on::after-request="if(event.detail.successful) location.reload()">
   ↻ Resume transcription</button>
-<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-swap="none" hx-confirm="Delete this job?"
-        hx-on::after-request="if(event.detail.successful) location.reload()">Delete job</button>
+<button class="danger" hx-delete="/api/jobs/{{ job.id }}" hx-swap="none"
+        hx-confirm="Delete this job (removes checkpoints)?"
+        hx-on::after-request="if(event.detail.successful) location.href='/jobs'">
+  🗑 Delete job</button>
 {% endif %}
 
 {% if job.state == 'CANCELLED' %}
@@ -129,15 +132,19 @@ htmx.on('meta-saved', () => {
 <button hx-post="/api/jobs/{{ job.id }}/resume" hx-swap="none"
         hx-confirm="Resume from checkpoints?"
         hx-on::after-request="if(event.detail.successful) location.reload()">↻ Resume from checkpoints</button>
-<button class="danger" hx-post="/api/jobs/{{ job.id }}/cancel" hx-swap="none" hx-confirm="Delete this job?"
-        hx-on::after-request="if(event.detail.successful) location.reload()">Delete job</button>
+<button class="danger" hx-delete="/api/jobs/{{ job.id }}" hx-swap="none"
+        hx-confirm="Delete this job (removes checkpoints)?"
+        hx-on::after-request="if(event.detail.successful) location.href='/jobs'">
+  🗑 Delete job</button>
 {% endif %}
 
 {% if job.state == 'DONE' %}
 <a class="btn" href="/api/jobs/{{ job.id }}/audio">⬇ Download {{ job.output.path }}</a>
 <audio controls src="/api/jobs/{{ job.id }}/audio"></audio>
-<button class="danger" hx-delete="/api/jobs/{{ job.id }}" hx-confirm="Delete this job (removes audio + checkpoints)?">
-  Delete job</button>
+<button class="danger" hx-delete="/api/jobs/{{ job.id }}" hx-swap="none"
+        hx-confirm="Delete this job (removes audio + checkpoints)?"
+        hx-on::after-request="if(event.detail.successful) location.href='/jobs'">
+  🗑 Delete job</button>
 {% endif %}
 
 {% if job.book and job.book.chapters %}
