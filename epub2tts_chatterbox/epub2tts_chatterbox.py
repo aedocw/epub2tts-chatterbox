@@ -142,8 +142,61 @@ def append_silence(tempfile, duration=1200):
     # Save the combined audio back to file
     combined.export(tempfile, format="flac")
 
+def move_model_to_device(model, device):
+    """
+    Move a ChatterboxTTS model between devices.
+
+    ChatterboxTTS is not an nn.Module - it is a container holding three
+    submodules plus a device string that generate() uses to place its inputs -
+    so each piece has to be moved by hand.
+    """
+    model.t3.to(device)
+    model.s3gen.to(device)
+    model.ve.to(device)
+    if model.conds is not None:
+        model.conds.to(device)
+    model.device = device
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return model
+
+
+def wait_for_priority_process(model=None, script_path="/home/doc/repos/call-handling/check_missing_calls.py"):
+    """
+    Pause generation while the call transcription script is running.
+
+    The GPU is shared with that script and it needs several GB to transcribe,
+    so simply idling here is not enough - this process would keep its weights
+    resident and starve it. While waiting, the model is parked on the CPU and
+    its VRAM handed back, then restored once the priority process is done.
+    """
+    original_device = None
+    try:
+        while True:
+            result = subprocess.run(["pgrep", "-f", script_path], capture_output=True)
+            if result.returncode != 0:
+                break
+
+            if model is not None and original_device is None:
+                original_device = model.device
+                try:
+                    print("Priority process detected, moving model to CPU to free GPU memory...")
+                    move_model_to_device(model, "cpu")
+                except Exception as e:
+                    print(f"Could not move model to CPU: {e}")
+                    original_device = None
+
+            print(f"Waiting for priority process ({script_path}) to finish...")
+            time.sleep(30)
+    finally:
+        if original_device is not None:
+            print(f"Priority process finished, moving model back to {original_device}...")
+            move_model_to_device(model, original_device)
+
+
 def chatterbox_read(sentences, sample, filenames, model, exaggeration, cfg_weight, progress_bar=None):
     for i, sent in enumerate(sentences):
+        wait_for_priority_process(model)
         clean_sent = conditional_sentence_case(sent.strip())
         max_attempts = 3
         # This "try 3 times" loop is probably not needed, actual failure was from a torch recursive error that was fixed
