@@ -1,5 +1,53 @@
 # Progress Log
 
+## 2026-10-29 — User-facing README + production docker-compose.yml ✅
+
+### Scope (testing phase: ship complete user docs)
+- Rewrote `README.md` as a full user-facing doc (was mostly upstream CLI text):
+  - **Attribution**: fork of aedocw/epub2tts-chatterbox (Christopher Aedo); upstream does not
+    accept issues/PRs → this fork adds web UI, Docker/compose deployment, bug fixes
+  - **Architecture**: single GPU container — FastAPI web UI + async job supervisor spawning
+    CLI subprocesses; files-as-state (`state.json`/`progress.json` per job dir); single-job
+    lock; resumable `partN.flac` checkpoints; GPU-aware bf16/fp32 precision; SSE progress
+  - **Install & Use**: Docker (compose one-liner + plain `docker run`), native Linux/macOS
+    CLI install, two-phase CLI usage with full flag table, `/data` layout table, env vars
+    (`EPUB2TTS_DATA`, `HF_HOME`, `NLTK_DATA`), web UI walkthrough (create → review → start →
+    cancel/resume → download)
+  - Bug reporting section points to **this** repo (upstream closed)
+  - Release notes updated (2026-10-26, 2026-10-29 entries)
+- **New `docker-compose.yml`** (production, distinct from `docker-compose.dev.yml`):
+  image `epub2tts-chatterbox:local`, nvidia GPU reservation (`device_ids: ["all"]`),
+  `NVIDIA_VISIBLE_DEVICES`/`NVIDIA_DRIVER_CAPABILITIES`/`HF_HOME` env, `8080:8080`,
+  bind mounts `/data` (books/speaker/jobs) + `/root/.cache/huggingface` (model cache),
+  `restart: unless-stopped`. Header comments cover build step + data layout.
+- `agent/outline.md` updated: layout now lists `docker-compose.yml`; new "README / deployment
+  docs" section documenting the README structure and compose file.
+
+### Follow-up (2026-10-29): ASCII → Mermaid diagrams
+- Replaced the ASCII architecture box in `README.md` with two **Mermaid** diagrams:
+  - `flowchart TB` — single GPU container: FastAPI (UI/API/supervisor) → CLI subprocess →
+    `/data` volumes (books, samples, jobs); brace-escaped node labels (`&#123;id&#125;`)
+  - `stateDiagram-v2` — job lifecycle: AWAITING_REVIEW → TRANSCRIBING → DONE, with
+    CANCELLED/FAILED both resuming into TRANSCRIBING
+- Removed the old inline one-line lifecycle note (now covered by the state diagram).
+
+### Validation
+- `docker compose -f docker-compose.yml config` → valid ✅
+- Cross-checked README claims against code: `EPUB2TTS_DATA` default `/data` (`app.py:24`),
+  `/data/speaker` samples dir (`app.py:121`), jobs dir auto-create (`app.py:39`), Dockerfile
+  entrypoint (uvicorn :8080), CLI flags from `outline.md` §4.
+
+### Files changed
+- `README.md` (rewritten, 10.5 KB)
+- `docker-compose.yml` (new)
+- `agent/outline.md`, `agent/progress.md`
+
+### Next
+- Proper testing of the app (user's stated next phase)
+- Commit to `dev` when approved
+
+---
+
 ## 2026-10-29 — Job delete button actually deletes (frontend bug) ✅
 
 ### Problem
@@ -53,9 +101,14 @@ buttons just never called it.
 - All 6 existing jobs visible: 3× CANCELLED, 1× FAILED, 1× DONE, 1× (other)
 - Note: container has no `curl`; use `/opt/conda/bin/python3` for HTTP testing
 
-### Next
-- [ ] Browser click-test: delete a CANCELLED job, verify dir + .flac files gone
-- [ ] Commit (awaiting approval)
+### Sync main script (2026-10-29)
+- Uploaded `epub2tts_chatterbox.py` (25,556 bytes) to container — was stale (v1.2.2 pip copy)
+- All 7 .py files now match local dev (md5 verified)
+- uvicorn restarted (PID 6459), HTTP 200 confirmed
+
+### Closed (2026-10-29)
+- [x] Browser click-test: user confirmed delete works in browser
+- [x] Committed `cafb0a9` on `dev`, pushed to `origin/dev`
 
 ---
 

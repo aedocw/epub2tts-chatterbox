@@ -1,185 +1,247 @@
-> epub2tts-chatterbox is a free and open source python app to easily create a full-featured audiobook from an epub or text file using realistic voice-cloning text-to-speech by [Chatterbox](https://github.com/resemble-ai/chatterbox). CUDA compatible GPU is required, or Apple silicon.
+> epub2tts-chatterbox is a free and open source Python app to easily create a full-featured audiobook from an EPUB or text file using realistic voice-cloning text-to-speech by [Chatterbox](https://github.com/resemble-ai/chatterbox). A CUDA-compatible GPU is required, or Apple Silicon.
+
+## 👤 Attribution
+
+This project is a **fork** of [aedocw/epub2tts-chatterbox](https://github.com/aedocw/epub2tts-chatterbox) by
+**[Christopher Aedo](https://aedo.dev)** (GitHub: [@aedocw](https://github.com/aedocw)), who wrote the
+core EPUB→audiobook pipeline and Chatterbox integration. All credit for the original tool goes to him.
+
+The upstream repository is currently **not accepting issues or pull requests**, which is why this fork
+exists. It builds on the original to add:
+
+- 🌐 **Web UI** (FastAPI + HTMX): browse books, pick a speaker sample, create jobs, edit chapters,
+  watch live progress, download the M4B — no command line needed
+- 🐳 **Production Docker image** serving the web UI, plus a **`docker-compose.yml`** for one-command
+  deployment with GPU passthrough
+- 🐛 **Bug fixes** and improvements (e.g. bounded-memory chapter assembly, fixed silence pruning,
+  FFmetadata escaping, chapter-title alignment, GPU-aware precision)
+
+The original CLI remains fully usable, including inside the Docker image.
 
 ## 🚀 Features
 
-- [x] Creates standard format M4B audiobook file
-- [x] Automatic chapter break detection
-- [x] Embeds cover art if specified
-- [x] Resumes where it left off if interrupted
-- [x] Web UI (browse books, pick a sample, watch live progress) in the Docker image
-- [x] GPU-aware precision: bf16 on Ampere+ (4060 Ti), fp32 on Pascal (1080/2080)
-- [x] NOTE: epub file must be DRM-free
+- Creates standard format M4B audiobook file (AAC + chapter metadata + embedded cover art)
+- Automatic chapter break detection (TOC / headings / CSS classes / fallback)
+- Embeds cover art if specified
+- **Resumes where it left off** if interrupted (per-paragraph/checkpoint FLACs)
+- Web UI (browse books, pick a sample, watch live progress) in the Docker image
+- Job supervisor: one job at a time, cancel/resume, crash recovery
+- GPU-aware precision: bf16 on Ampere+ (e.g. 4060 Ti), fp32 on Pascal (e.g. 1080/2080) — automatic
+- NOTE: EPUB files must be DRM-free
 
+## 🏗️ Architecture
 
-## 📖 Usage
-<details>
-<summary> Usage instructions</summary>
+A **single GPU container** runs everything:
 
-*NOTE:* If you want to specify where NLTK tokenizer will be stored (about 50mb), use an environment variable: `export NLTK_DATA="your/path/to/nltk_data"`
+```mermaid
+flowchart TB
+    subgraph CONTAINER["Single GPU container"]
+        subgraph WEB["FastAPI app (uvicorn, :8080)"]
+            UI["Web UI pages<br/>(Jinja2 + HTMX)<br/>/ · /jobs · /jobs/&#123;id&#125;"]
+            API["REST API<br/>/api/books · /api/samples · /api/jobs…"]
+            SUP["Job supervisor<br/>(async loop, single-job lock)"]
+        end
+        CLI["epub2tts-chatterbox (CLI subprocess)<br/>EPUB → book.txt (epub_export)<br/>text → Chatterbox TTS (GPU)<br/>ffmpeg: concat + silence pruning → partN.flac<br/>ffmpeg: metadata → .m4b (+ cover)"]
+    end
 
-## OPTIONAL - activate the virtual environment if using
-1. `source .venv/bin/activate`
+    subgraph DATA["/data (bind mount)"]
+        BOOKS["<book-folder>/*.epub<br/>source books"]
+        SAMPLES["speaker/*.wav|mp3<br/>voice-cloning samples"]
+        JOBS["jobs/&#123;job-id&#125;/<br/>book.txt · checkpoints · logs · .m4b"]
+    end
 
-## FIRST - extract epub contents to text and cover image to png:
-1. `epub2tts-chatterbox mybook.epub`
-2. **edit mybook.txt**, replacing `# Part 1` etc with desired chapter names, and removing front matter like table of contents and anything else you do not want read. **Note:** First two lines can be Title: and Author: to use that in audiobook metadata.
-
-## Read text to audiobook:
-
-* `epub2tts-chatterbox mybook.txt --cover mybook.png --sample <speaker sample>`
-* Specify a speaking sample with `--sample <speaker>`. Ideally your speaking sample should be 30-60 seconds long and can be WAV or MP3 (or a few other formats I don't recall). Sample should be clean audio, no background music or sounds.
-
-
-## All options
-* `-h, --help` - show this help message and exit
-* `--sample SampleAudioFile` - Speaker sample to use (example: george.wav)
-* `--cover image.[jpg|png]` - Image to use for cover
-* `--notitles` - Do not read chapter titles when creating audiobook
-
-## Deactivate virtual environment
-`deactivate`
-</details>
-
-## 🐞 Reporting bugs
-<details>
-<summary>How to report bugs/issues</summary>
-
-Thank you in advance for reporting any bugs/issues you encounter! If you are having issues, first please [search existing issues](https://github.com/aedocw/epub2tts-chatterbox/issues) to see if anyone else has run into something similar previously.
-
-If you've found something new, please open an issue and be sure to include:
-1. The full command you executed
-2. The platform (Linux, Windows, OSX, Docker)
-3. Your Python version if not using Docker
-
-</details>
-
-## 🗒️ Release notes
-<details>
-<summary>Release notes </summary>
-
-* 20261026: Added web UI (FastAPI) + job supervisor; GPU-aware precision (bf16 on Ampere+, fp32 on Pascal); production Dockerfile now serves the web UI on :8080
-* 20250224: Changed to read individual sentences rather than entire paragraph, for reading speed consistency
-* 20250221: Added `--notitles` option
-* 20250216: Initial release
-
-</details>
-
-## 📦 Install
-
-Required Python version is 3.12.
-
-*NOTE:* If you want to specify where NLTK tokenizer will be stored (about 50mb), use an environment variable: `export NLTK_DATA="your/path/to/nltk_data"`
-
-<details>
-<summary>MAC INSTALLATION</summary>
-
-This installation requires Python < 3.12 and [Homebrew](https://brew.sh/) (I use homebrew to install espeak, [pyenv](https://stackoverflow.com/questions/36968425/how-can-i-install-multiple-versions-of-python-on-latest-os-x-and-use-them-in-par) and ffmpeg).
-
-```
-#install dependencies
-brew install mecab espeak pyenv ffmpeg
-#install epub2tts-chatterbox
-git clone https://github.com/aedocw/epub2tts-chatterbox
-cd epub2tts-chatterbox
-pyenv install 3.11
-pyenv local 3.11
-#OPTIONAL - install this in a virtual environment
-python -m venv .venv && source .venv/bin/activate
-pip install .
-```
-</details>
-
-<details>
-<summary>LINUX INSTALLATION</summary>
-
-These instructions are for Ubuntu 24.04.1 LTS and 22.04  (20.04 showed some dependency issues), but should work (with appropriate package installer mods) for just about any distro. Ensure you have `ffmpeg` installed before use.
-
-```
-#install dependencies
-sudo apt install espeak-ng ffmpeg python3-venv
-#clone the repo
-git clone https://github.com/aedocw/epub2tts-chatterbox
-cd epub2tts-chatterbox
-#OPTIONAL - install this in a virtual environment
-python3 -m venv .venv && source .venv/bin/activate
-pip install .
+    UI --> SUP
+    API --> SUP
+    SUP -- "spawns one subprocess per job (cwd = job dir)" --> CLI
+    BOOKS -- "EPUB input" --> CLI
+    SAMPLES -- "speaker sample" --> CLI
+    CLI -- "state.json · progress.json · partN.flac · .m4b" --> JOBS
 ```
 
-</details>
+Job lifecycle:
 
-<details>
-<summary>Docker INSTALLATION</summary>
-
-The production image ships the **web UI** (FastAPI + job supervisor). Build it
-from the repo root, then run with GPU passthrough and a `/data` bind mount:
-
+```mermaid
+stateDiagram-v2
+    [*] --> AWAITING_REVIEW: create job
+    AWAITING_REVIEW --> TRANSCRIBING: start
+    TRANSCRIBING --> DONE: finished
+    TRANSCRIBING --> CANCELLED: cancel (SIGTERM)
+    TRANSCRIBING --> FAILED: crash / OOM
+    CANCELLED --> TRANSCRIBING: resume
+    FAILED --> TRANSCRIBING: resume
+    DONE --> [*]
 ```
-sudo docker build -t epub2tts-chatterbox:local .
 
-sudo docker run -d \
+Key design points:
+
+- **Files as state** — each job is a directory under `/data/jobs/` containing `state.json`
+  (job state/metadata) and `progress.json` (hot progress file). No database.
+- **Subprocess jobs** — each TTS run is the original CLI launched with `cwd` = the job dir,
+  so all intermediates (`partN.flac`, `pgraphs*.flac`, …) live in the job dir and cleanup is
+  trivial. This keeps job lifetime decoupled from the web process.
+- **Single-job lock** — one job can transcribe at a time (fits one GPU); starting another
+  returns `409` while busy.
+- **Crash/cancel resumable** — completed chapters exist as `partN.flac` and are skipped on
+  re-run. On server restart, orphaned `TRANSCRIBING` jobs are marked `FAILED` (resumable).
+- **GPU-aware precision** — at startup the app reads the GPU compute capability: Ampere+
+  (cc ≥ 8) gets bf16 autocast + TF32; older cards (Pascal/Volta) stay on native fp32.
+  No configuration needed.
+- **Live progress** — the supervisor tails the subprocess stdout (tqdm lines), writes
+  `progress.json` every ~2 s; the UI updates via SSE/polling.
+
+## 📦 Install & Use
+
+### Option A — Docker (recommended)
+
+Requirements: Linux host with an **NVIDIA GPU** + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/installation-guide.html).
+
+```bash
+git clone <this-repo> && cd epub2tts-chatterbox
+docker build -t epub2tts-chatterbox:local .
+```
+
+#### With Docker Compose (one command)
+
+Edit the two bind-mount paths in [`docker-compose.yml`](./docker-compose.yml) to your
+locations, then:
+
+```bash
+docker compose up -d
+```
+
+Open the web UI at **`http://<host>:8080`**.
+
+#### With plain `docker run`
+
+```bash
+docker run -d \
   --name epub2tts-chatterbox \
   --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -e HF_HOME=/root/.cache/huggingface \
-  -v /mnt/dm5/_ebook:/data \
-  -v /mnt/models/epub2tts:/root/.cache/huggingface \
+  -v /path/to/books:/data \
+  -v /path/to/model-cache:/root/.cache/huggingface \
   -p 8080:8080 \
   epub2tts-chatterbox:local
 ```
 
-Then open the web UI at `http://<host>:8080` to browse books, pick a speaker
-sample, create a job, and watch transcription progress live. (Books go in
-`/data/<folder>/*.epub`, speaker samples in `/data/speaker/`.)
+#### Data layout (the `/data` bind mount)
 
-</details>
+| Path | Purpose |
+|---|---|
+| `/data/<folder>/*.epub` | Books to browse in the UI (one subfolder per collection) |
+| `/data/speaker/*.wav\|mp3` | Speaker samples for voice cloning (30–60 s, clean audio, no background noise) |
+| `/data/jobs/` | Job dirs (created automatically): `book.txt`, checkpoints, logs, final `.m4b` |
 
-> **GPU precision is automatic:** the app detects the GPU's compute capability
-> at startup. On **Ampere+ cards (e.g. 4060 Ti)** it enables bf16 autocast +
-> TF32 for a speedup; on **older cards (e.g. GTX 1080/2080)** it stays on the
-> native fp32 path (no bf16), which is their fastest option. No configuration
-> needed — it works on both. The CLI is still available inside the image if you
-> prefer it (`docker run -it --rm --entrypoint ... epub2tts-chatterbox:local`).
+The HuggingFace cache mount (`/root/.cache/huggingface`) is where the Chatterbox model
+(~several GB) is downloaded on first run — keep it on a persistent path so rebuilds don't
+re-download it.
 
-<details>
-<summary>WINDOWS INSTALLATION</summary>
+### Using the Web UI
 
-Running epub2tts-chatterbox in WSL2 with Ubuntu 22 is the easiest approach, but these steps should work for running directly in windows.
+1. **Home** (`/`) — pick a book folder + EPUB, a speaker sample, optional TTS parameters
+   (exaggeration, CFG weight, read-titles flag) → **Create job**
+2. **Job page** — review the extracted text and chapter names, edit titles/text if needed
+   (remove front matter like the table of contents, rename `#` chapter headings)
+3. **Start** — transcription begins; progress bar, current chapter, and ETA update live
+4. **Cancel / Resume** — canceling keeps checkpoints; starting again skips completed chapters
+5. **Done** — download the M4B (with chapter markers and cover art)
 
-(TBD)
+### Option B — Native install (CLI only)
 
-</details>
+Requires Python 3.12 (3.11 works on Mac), `ffmpeg`, `espeak-ng`.
 
+**Linux (Ubuntu 22.04/24.04):**
+```bash
+sudo apt install espeak-ng ffmpeg python3-venv
+git clone <this-repo> && cd epub2tts-chatterbox
+python3 -m venv .venv && source .venv/bin/activate
+pip install .
+```
 
-## Updating
+**macOS (Homebrew + pyenv):**
+```bash
+brew install mecab espeak pyenv ffmpeg
+git clone <this-repo> && cd epub2tts-chatterbox
+pyenv install 3.11 && pyenv local 3.11
+python -m venv .venv && source .venv/bin/activate
+pip install .
+```
 
-<details>
-<summary>UPDATING YOUR INSTALLATION</summary>
+**First run** downloads the NLTK tokenizers (~50 MB). To control where they go:
+`export NLTK_DATA="your/path/to/nltk_data"`. The Chatterbox model is downloaded from
+HuggingFace on first TTS run (cached in `HF_HOME`).
 
-1. cd to repo directory
-2. `git pull`
-3. Activate virtual environment you installed epub2tts in if you installed in a virtual environment using "source .venv/bin/activate"
-4. `pip install . --upgrade`
-</details>
+### CLI usage (two phases)
 
+**Phase 1 — extract EPUB to text** (edit the result before continuing):
+```bash
+epub2tts-chatterbox mybook.epub
+# → mybook.txt (+ mybook.png if a cover was found)
+# Edit mybook.txt: first two lines may be "Title:" / "Author:",
+# "# Chapter N" lines mark chapters, remove anything you don't want read.
+```
 
-## Author
+**Phase 2 — text to audiobook** (writes to the *current working directory*):
+```bash
+epub2tts-chatterbox mybook.txt --cover mybook.png --sample speaker.wav
+# → "mybook (speaker).m4b"
+```
 
-👤 **Christopher Aedo**
+| Argument | Meaning |
+|---|---|
+| `sourcefile` | `.epub` (phase 1) or `.txt` (phase 2) |
+| `--sample FILE` | Speaker sample (WAV/MP3, ideally 30–60 s, clean) |
+| `--cover FILE` | Cover image (jpg/png) to embed |
+| `--notitles` | Don't read chapter titles aloud |
+| `--no-prune` | Disable silence pruning |
+| `--exaggeration FLOAT` | Voice-cloning exaggeration (default `0.7`) |
+| `--cfg_weight FLOAT` | Chatterbox CFG weight (default `0.4`) |
+| `--naming CHOICE` | EPUB chapter naming: `auto` (default), `toc`, `heading`, `class`, `fallback` |
 
-- Website: [aedo.dev](https://aedo.dev)
-- GitHub: [@aedocw](https://github.com/aedocw)
-- LinkedIn: [@aedo](https://linkedin.com/in/aedo)
+Killing a run mid-way is safe — re-running in the same directory resumes from checkpoints.
 
-👥 **Contributors**
+## 🔄 Updating
 
-[![Contributors](https://contrib.rocks/image?repo=aedocw/epub2tts-chatterbox)](https://github.com/aedocw/epub2tts-chatterbox/graphs/contributors)
+```bash
+git pull
+# native install:
+source .venv/bin/activate && pip install . --upgrade
+# docker:
+docker build -t epub2tts-chatterbox:local . && docker compose up -d
+```
 
-## 🤝 Contributing
+## 📝 Environment variables
 
-Contributions, issues and feature requests are welcome!\
-Feel free to check the [issues page](https://github.com/aedocw/epub2tts-chatterbox/issues) or [discussions page](https://github.com/aedocw/epub2tts-chatterbox/discussions).
+| Variable | Default | Purpose |
+|---|---|---|
+| `EPUB2TTS_DATA` | `/data` | Data root for books/samples/jobs (web UI) |
+| `HF_HOME` | — | HuggingFace model cache location |
+| `NLTK_DATA` | — | Where NLTK tokenizers (~50 MB) are stored |
 
-## Show your support
+## 🗒️ Release notes
+
+- **2026-10-29** — Job delete button fixed (frontend); bounded-memory chapter build
+  (streaming ffmpeg, flat RAM) + fixed silence pruning; `--no-prune` flag; ffmetadata escaping
+- **2026-10-26** — Web UI (FastAPI + HTMX) + job supervisor; GPU-aware precision
+  (bf16 on Ampere+, fp32 on Pascal); production Dockerfile serving the web UI on :8080;
+  web deps added to `requirements.txt`; `docker-compose.yml`
+- 2025-02-24 — Read individual sentences rather than entire paragraphs
+- 2025-02-21 — Added `--notitles` option
+- 2025-02-16 — Initial release (upstream)
+
+## 🐞 Reporting bugs
+
+Please file issues in **this** repository (the upstream project is not accepting issues/PRs).
+Include:
+1. The full command you executed (or the UI steps taken)
+2. The platform (Linux, Windows, macOS, Docker) and GPU model
+3. Python version if not using Docker
+4. Relevant log output (`/data/jobs/<id>/stdout.log` for web UI jobs)
+
+## 👥 Contributors
+
+Original author: [Christopher Aedo](https://aedo.dev) — [@aedocw](https://github.com/aedocw)
 
 Give a ⭐️ if this project helped you!

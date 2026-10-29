@@ -66,6 +66,7 @@ epub2tts-chatterbox/
 │                              #   ENTRYPOINT runs the web UI (uvicorn) on :8080, no SSH
 ├── Dockerfile-dev             # dev image: + openssh-server, ENTRYPOINT entrypoint-dev.sh
 ├── entrypoint-dev.sh          # starts sshd, keeps container alive (SSH dev flow)
+├── docker-compose.yml         # PRODUCTION compose: GPU + /data + HF cache mounts, :8080
 ├── requirements.txt
 ├── setup.py                   # console script: epub2tts-chatterbox
 ├── epub2tts_chatterbox/
@@ -308,6 +309,25 @@ AWAITING_REVIEW → TRANSCRIBING → DONE
   distinguishes user cancel from crash in `_finalize()`.
 - **Orphan recovery**: on server restart, `TRANSCRIBING` jobs with no live process are
   marked `FAILED` ("interrupted — resumable").
+
+### README / deployment docs (2026-10-29)
+
+- **`README.md`** rewritten as user-facing documentation:
+  - Attribution section (fork of aedocw/epub2tts-chatterbox; upstream not accepting
+    issues/PRs — this fork adds the web UI, Docker/compose deployment, bug fixes)
+  - Architecture section: **Mermaid diagrams** — `flowchart TB` (container: FastAPI UI/API/
+    supervisor → CLI subprocess → /data volumes) + `stateDiagram-v2` job lifecycle
+    (AWAITING_REVIEW → TRANSCRIBING → DONE / CANCELLED / FAILED, resumable);
+    single GPU container: FastAPI + supervisor + CLI subprocess,
+    files-as-state, single-job lock, resumable checkpoints, GPU-aware precision, SSE
+  - Install & Use: Docker (compose + plain `docker run`), native Linux/macOS, CLI two-phase
+    usage with all flags, data-layout table (`/data/<folder>/*.epub`, `/data/speaker/`,
+    `/data/jobs/`), env vars (`EPUB2TTS_DATA`, `HF_HOME`, `NLTK_DATA`)
+  - Bug reporting directed to **this** repo (upstream closed)
+- **`docker-compose.yml`** (new, production): `epub2tts-chatterbox:local` image, nvidia GPU
+  reservation (device_ids "all"), `NVIDIA_VISIBLE_DEVICES`/`NVIDIA_DRIVER_CAPABILITIES`/`HF_HOME`
+  env, `8080:8080`, bind mounts `/data` + HF cache. Validated with `docker compose config`.
+- Dev compose (`docker-compose.dev.yml`) remains for the SSH dev container (GPU 1, :2222).
 
 ### Test coverage (2026-10-26, 45/45 passed)
 
