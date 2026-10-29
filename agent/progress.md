@@ -1,5 +1,69 @@
 # Progress Log
 
+## 2026-10-29 — Bounded-memory chapter build + fixed silence pruning ✅
+
+### Problem
+- **A (RAM):** `read_book()` assembled each chapter with `combined += AudioSegment.from_file(file)`, decoding the whole chapter to raw PCM and copying on every `+=`. Peak RAM ≈ 2× chapter length (~173 MB per hour of 24 kHz mono 16-bit).
+- **B (Silence):** Chatterbox emits long silences that were never pruned. Pruning the finished m4b would break chapter markers, so it had to happen before part files were finalized.
+
+### Solution: one streaming ffmpeg call per chapter
+
+Replaced the pydub chapter assembly (and `append_silence(files[-1], 2000)`) with a single streaming `ffmpeg` call via `build_part()`. It concatenates the paragraph FLACs, applies the fixed `SILENCE_FILTER`, then appends the 2 s chapter-end pad (`apad` after `silenceremove`, so the pad is never pruned).
+
+#### Changes to `epub2tts_chatterbox.py` (642 lines)
+
+1. **`SILENCE_FILTER`** — fixed filter: `silenceremove=stop_periods=-1:stop_duration=1.5:stop_threshold=-50dB`. No adaptive logic.
+2. **`build_part(paragraph_files, partname, prune=True)`** — single streaming ffmpeg call: concat → silenceremove → apad → FLAC. Atomic write via `os.replace(tmp, partname)`. Deletes the temp list file.
+3. **`get_duration()`** — replaced pydub decode with `ffprobe -show_entries format=duration` (header-only, no decode). Returns milliseconds as float.
+4. **`generate_metadata()`** — accumulates durations as floats, rounds only when writing START/END. Added `assert len(files) == len(chapter_titles)`.
+5. **`escape_ffmeta()`** — escapes `\`, `=`, `;`, `#`, `\n`, `\r` for FFMETADATAFILE. Applied to title, artist, album, and chapter titles.
+6. **`get_book()`** — removed the per-`#`-line `chapter_titles.append()` calls. Titles now derived from the final `book_contents` list: `chapter_titles = [c["title"] for c in book_contents]`. Fixes the misalignment when `# Part One` is directly followed by `# Chapter 1`.
+7. **Chapter-scoped paragraph temp names** — `pgraphs_c{chapter:04d}_p{pindex:05d}.flac` so leftovers from one chapter can never be picked up by another.
+8. **`--no-prune` CLI flag** — passes `prune=False` to `read_book()` → `build_part()`.
+9. **Stale temp cleanup** — `read_book()` removes `*.tmp.flac` and `*.list.txt` at startup.
+10. **`append_silence()`** — kept for paragraph-level use (600 ms between sentences within a paragraph). Chapter-level 2 s pause now handled by `apad` in `build_part`.
+
+#### Silenceremove semantics (verified on ffmpeg 4.2.7)
+
+| Input | Output | Notes |
+|-------|--------|-------|
+| 1 s tone + 1.6 s silence + 1 s tone | 2.02 s | Silence ≥ 1.5 s → removed (~20 ms residual) |
+| 2 s tone + 5 s silence + 2 s tone | 4.02 s | 5 s silence removed |
+| 2 s tone + 2 s silence + 2 s tone | 4.02 s | 2 s silence removed |
+| 1 s tone + 1.4 s silence + 1 s tone | 3.40 s | Below threshold → untouched |
+| Two 2 s gaps (7 s total) | 3.04 s | Both removed independently |
+| 600 ms paragraph pause | untouched | Below 1.5 s threshold |
+
+Silences **< 1.5 s are untouched**. Silences **≥ 1.5 s are removed entirely** (not trimmed to 1.5 s), leaving ~20 ms residual.
+
+### Test results (test_suite4.py on dev container, 2026-10-29)
+
+**34 passed, 0 failed** ✅
+
+| Test | Result |
+|------|--------|
+| **2. Pruning** | 13 s input with 5 s + 4 s silences → 6.04 s pruned (both removed + 2 s pad). `--no-prune` → 15.0 s. No temp files left. |
+| **1. Memory** | Old pydub: 60.7 MB RSS delta. New `build_part`: **0.0 MB** Python RSS delta. ffmpeg child: **49.5 MB** peak RSS (streaming, flat). 10 min of audio. |
+| **3. Markers** | 3 chapters in M4B. All chapter starts **0 ms** from cumulative part durations (well within 50 ms tolerance). Titles correct. |
+| **4. Titles** | `# Part One` → `# Chapter 1` alignment: 2 chapters, 2 titles. Special chars (`=`, `;`, `#`, `\`, newline) all escape correctly. |
+| **5. Resume** | Stale `.tmp.flac` and `.list.txt` cleaned. `part1.flac` preserved. `part2.flac` created atomically. No temp files left. |
+
+### Files changed
+- `epub2tts_chatterbox/epub2tts_chatterbox.py` — 642 lines (was ~580 before changes)
+- `/tmp/test_suite4.py` — acceptance test suite (not committed; lives in `/data/devel/` on dev container)
+
+### Non-goals honored
+- No change to Chatterbox parameters, text splitting, or `epub_export`.
+- No adaptive thresholds, no numpy/soundfile processing.
+- `make_m4b` untouched.
+- Part files from older runs used as-is (unpruned).
+
+### Next
+- [ ] A/B listen test: generate a real book with and without `--no-prune` and compare
+- [ ] Commit to `dev` (awaiting approval)
+
+---
+
 ## 2026-10-26 (later) — GPU-aware precision + production Dockerfile + README
 
 ### 1. GPU-aware precision (universal across GPUs) — `epub2tts_chatterbox.py`

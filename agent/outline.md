@@ -104,6 +104,7 @@ Entry point: `epub2tts-chatterbox` (console script) → `epub2tts_chatterbox.epu
 | `--sample` | str | `none` | Speaker sample for voice cloning (WAV/MP3, ideally 30–60 s, clean audio). Omitting → Chatterbox's default voice |
 | `--cover` | str | — | Cover image (jpg/png) to embed in M4B |
 | `--notitles` | flag | off | Don't read chapter titles aloud |
+| `--no-prune` | flag | off | Disable silence pruning (default: prune with fixed ffmpeg filter) |
 | `--exaggeration` | float | `0.7` | Chatterbox voice-cloning exaggeration factor |
 | `--cfg_weight` | float | `0.4` | Chatterbox CFG weight |
 | `--naming` | choice | `auto` | Chapter naming for EPUB: `auto`, `toc`, `heading`, `class`, `fallback` |
@@ -171,7 +172,8 @@ Pause timing: 600 ms between paragraphs, 2000 ms between chapters (hardcoded in 
 2. `get_book(sourcefile)` → `(book_contents, title, author, chapter_titles)`
    - `book_contents` = list of `{"title": str, "paragraphs": [str]}`
 3. `validate_text_file(...)` — exits on missing Title/Author/`#`
-4. `read_book(book_contents, sample, notitles, exaggeration, cfg_weight)`:
+4. `read_book(book_contents, sample, notitles, exaggeration, cfg_weight, prune=True)`:
+   - **Stale temp cleanup**: removes `*.tmp.flac` and `*.list.txt` from CWD at startup
    - Device auto-detect: `cuda` → `mps` → `cpu`; `ChatterboxTTS.from_pretrained(device=...)`
    - Prints per-chapter **Elapsed / ETA** (chars-based estimate)
    - Prepend chapter title to first paragraph unless `--notitles` or title is `Title`/empty
@@ -179,9 +181,14 @@ Pause timing: 600 ms between paragraphs, 2000 ms between chapters (hardcoded in 
    - `combine_short_sentences()` (short sentences merged to ≥ 8 words)
    - **GPU-aware precision** (decided at startup in `read_book`): `use_bf16 = (device=="cuda" and compute-capability major >= 8)`. On **Ampere+** (e.g. 4060 Ti) it enables bf16 autocast **and** TF32 (`matmul.allow_tf32`, `cudnn.allow_tf32`); on **Pascal** (1080/2080, cc 6.1/7.5) it leaves both off → native fp32 (their fastest path; no native bf16, crippled fp16). `cudnn.benchmark` is left off (TTS shapes vary per sentence → autotune re-runs). `torch.inference_mode()` is always on.
    - Per sentence: `conditional_sentence_case()` (3 consecutive ALL-CAPS words → lowercase) then `model.generate()` wrapped in `torch.inference_mode()` + (bf16 autocast iff `use_bf16`); 3 retry attempts
-   - tqdm progress bar per chapter (sentence count); per-paragraph resume via existing `pgraphs<i>.flac`
+   - tqdm progress bar per chapter (sentence count); per-paragraph resume via existing `pgraphs_c{chapter:04d}_p{pindex:05d}.flac`
+   - **`build_part(files, partname, prune)`** — single streaming ffmpeg call: concat paragraph FLACs → `silenceremove` (fixed filter) → `apad=pad_dur=2` → FLAC. Atomic write via `os.replace`. Replaces the old pydub `combined += AudioSegment.from_file()` assembly (which decoded the whole chapter to raw PCM). Peak RAM stays flat regardless of chapter length.
    - Returns list of `part<i>.flac`
 5. `generate_metadata(files, author, title, chapter_titles)` → `FFMETADATAFILE`
+   - `get_duration()` uses `ffprobe -show_entries format=duration` (header-only, no decode)
+   - Durations accumulated as floats; `START`/`END` rounded only when written
+   - `escape_ffmeta()` applied to title, artist, album, and chapter titles (escapes `\`, `=`, `;`, `#`, `\n`, `\r`)
+   - `assert len(files) == len(chapter_titles)`
 6. `make_m4b(files, sourcefile, speaker)` → ffmpeg concat → `.m4a` → aac+metadata → `.m4b`, cleans intermediates
 7. `add_cover(cover, m4b)` → mutagen `mp4` `covr` atom
 
