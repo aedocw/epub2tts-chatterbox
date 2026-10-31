@@ -469,10 +469,18 @@ def get_duration(file_path):
         capture_output=True, text=True, check=True).stdout
     return float(out) * 1000
 
-def make_m4b(files, sourcefile, speaker):
+def _safe_filename(name):
+    """Strip characters that are unsafe in a filename (and path separators)."""
+    name = name.replace("/", "").replace("\\", "")
+    return name.strip() or "book"
+
+
+def make_m4b(files, sourcefile, speaker, title=None):
     filelist = "filelist.txt"
     speaker_file = os.path.basename(speaker)
-    basefile = sourcefile.replace(".txt", "")
+    # Prefer the real book title for the output name; fall back to the
+    # source filename (minus .txt) when no title is available.
+    basefile = _safe_filename(title) if title else sourcefile.replace(".txt", "")
     outputm4a = f"{basefile}.m4a"
     speaker_name = os.path.splitext(speaker_file)[0]
     outputm4b = f"{basefile} ({speaker_name}).m4b"
@@ -650,7 +658,7 @@ def main():
         sample = "none"
     files = read_book(book_contents, sample, args.notitles, args.exaggeration, args.cfg_weight, prune=not args.no_prune)
     generate_metadata(files, book_author, book_title, chapter_titles)
-    m4bfilename = make_m4b(files, args.sourcefile, sample)
+    m4bfilename = make_m4b(files, args.sourcefile, sample, book_title)
     add_cover(args.cover, m4bfilename)
     
 if __name__ == "__main__":

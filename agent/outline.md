@@ -161,7 +161,9 @@ Final:
 - `FFMETADATAFILE` — temporary FFmpeg metadata (deleted)
 - `filelist.txt` — temporary concat list (deleted)
 - `mybook.m4a` — intermediate FLAC-in-MP4 (deleted)
-- **`mybook (<speaker_name>).m4b`** — FINAL OUTPUT (`.txt` stripped, speaker = sample filename stem)
+- **`<Book Title> (<speaker_name>).m4b`** — FINAL OUTPUT (`.txt` stripped; **title** = parsed book title via
+  `_safe_filename()`, falls back to `book`; speaker = sample filename stem). Before the
+  2026-10-31 fix this was hardcoded to `book (<speaker>).m4b`.
   - AAC audio + `[CHAPTER]` metadata (title, start/end, TIMEBASE 1/1000) + `covr` cover atom if `--cover` given
 
 Pause timing: 600 ms between paragraphs, 2000 ms between chapters (hardcoded in `append_silence` calls).
@@ -190,7 +192,8 @@ Pause timing: 600 ms between paragraphs, 2000 ms between chapters (hardcoded in 
    - Durations accumulated as floats; `START`/`END` rounded only when written
    - `escape_ffmeta()` applied to title, artist, album, and chapter titles (escapes `\`, `=`, `;`, `#`, `\n`, `\r`)
    - `assert len(files) == len(chapter_titles)`
-6. `make_m4b(files, sourcefile, speaker)` → ffmpeg concat → `.m4a` → aac+metadata → `.m4b`, cleans intermediates
+6. `make_m4b(files, sourcefile, speaker, book_title)` → ffmpeg concat → `.m4a` → aac+metadata →
+   `.m4b`, cleans intermediates. Final name = `<book_title> (<speaker>).m4b` (via `_safe_filename()`).
 7. `add_cover(cover, m4b)` → mutagen `mp4` `covr` atom
 
 **Resume behavior:** killing the process mid-run is safe — `partN.flac` and `pgraphsN.flac` files are checked and skipped on next run.
@@ -233,7 +236,8 @@ Other useful functions:
 - **GPU required in practice**: model load `ChatterboxTTS.from_pretrained()` happens once per run; a long-lived worker should load it once and reuse it (the script doesn't).
 - **Resume**: rerunning on the same CWD resumes; keep the job's working dir persistent.
 - **Validation**: replicate `validate_text_file` server-side; the text must start with `Title:`/`Author:` and contain ≥1 `#` line.
-- **Metadata naming**: final filename is `base (<sample-stem>).m4b`; `--notitles` and pauses (600/2000 ms) are hardcoded.
+- **Metadata naming**: final filename is `<book title> (<sample-stem>).m4b` (was `base (...)` before
+  2026-10-31); `--notitles` and pauses (600/2000 ms) are hardcoded.
 - **Sample audio**: 30–60 s clean WAV/MP3 recommended.
 
 ## 10. Web frontend API (implemented in `web/`)
@@ -295,6 +299,14 @@ AWAITING_REVIEW → TRANSCRIBING → DONE
   CLI subprocess runs with `cwd=job_dir`, all intermediates live there and are
   cleaned up automatically: `partN.flac`, `pgraphs_*.flac`, `sntnc*.wav`,
   `book.txt`, `state.json`, `progress.json`, `stdout.log`, `error.txt`, `*.m4b`.
+
+> **Supervisor stdout pump gotcha (2026-10-31):** `tqdm` renders progress with `\r`, not `\n`,
+> so a long run's stdout is one giant "line" from `readline()`'s view. asyncio raises
+> `LimitOverrunError` once a line exceeds **64 KB**, which silently killed the
+> `Supervisor.run()` task and left long jobs stuck in `TRANSCRIBING` (M4B written but never
+> finalized). `_pump_once()` and the post-exit drain now read bounded chunks (`read(8192)`) —
+> `JobProcess.feed()` splits on `\n` internally, so chunk boundaries are safe. Short test books
+> never crossed 64 KB, which is why tests passed but a 100-chapter production run did not.
 - Delete is refused (409) for `TRANSCRIBING`/`ENCODING` jobs — cancel first.
 
 ### Key implementation details
