@@ -236,11 +236,11 @@ class Supervisor:
                         # drain whatever stdout is left
                         try:
                             while True:
-                                line = await jp.proc.stdout.readline()
-                                if not line:
+                                chunk = await jp.proc.stdout.read(8192)
+                                if not chunk:
                                     break
-                                jp.feed(line.decode("utf-8", errors="replace"))
-                                self._log(jp, line)
+                                jp.feed(chunk.decode("utf-8", errors="replace"))
+                                self._log(jp, chunk)
                         except Exception:
                             pass
                         await self._finalize(jp)
@@ -266,14 +266,25 @@ class Supervisor:
             pass
 
     async def _pump_once(self, jp: JobProcess):
-        """Read one chunk of stdout (raises StopAsyncIteration on EOF)."""
-        line = await jp.proc.stdout.readline()
-        if not line:
+        """Read one bounded chunk of stdout (raises StopAsyncIteration on EOF).
+
+        We read fixed-size chunks instead of readline(). During TTS, tqdm
+        reports progress with carriage returns (\r), not newlines, so an
+        entire chapter's progress is a single *unterminated* line from
+        readline()'s perspective. On a large book that line exceeds asyncio's
+        64 KB readline limit and raises LimitOverrunError, which would kill
+        the whole Supervisor.run() task (leaving the job stuck in
+        TRANSCRIBING and no longer able to finalize). JobProcess.feed()
+        splits accumulated bytes on \n itself, so arbitrary chunk boundaries
+        are safe.
+        """
+        chunk = await jp.proc.stdout.read(8192)
+        if not chunk:
             # stdout hit EOF — wait for the process to exit so returncode is set
             await jp.proc.wait()
             raise StopAsyncIteration
-        jp.feed(line.decode("utf-8", errors="replace"))
-        self._log(jp, line)
+        jp.feed(chunk.decode("utf-8", errors="replace"))
+        self._log(jp, chunk)
         st.write_progress(self.data_root, jp.job_id, jp.progress_dict())
         # throttle state.json mirrors (tqdm emits many lines/sec)
         now = time.time()

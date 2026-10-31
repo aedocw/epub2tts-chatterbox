@@ -1,5 +1,65 @@
 # Progress Log
 
+## 2026-10-31 — Stuck 99% job root-caused + final `.m4b` now keeps the book title ✅
+
+### Problem (production/dev container, real full-book run)
+- First full-book transcription (The Death Mage, ch. 101–200 → 100 chapters, ~1.6 GB
+  M4B) **finished successfully** (the CLI child produced a valid M4B), but the frontend
+  job was stuck at **99.0% / ch. 100/100, state `TRANSCRIBING`**.
+- User also wanted the final file to be named after the **real book title** instead of
+  `book (sample2).m4b`.
+
+### Why it worked in tests but not in production
+- The supervisor reads the CLI child's stdout **line-by-line** with `readline()`. asyncio
+  enforces a **64 KB per-line cap** (`LimitOverrunError`). `tqdm` renders progress with
+  `\r` (carriage return), **not** `\n`, so a long TTS run's stdout is one giant "line" from
+  `readline()`'s point of view. Once a 100-chapter run crossed 64 KB, `readline()` raised
+  `LimitOverrunError` → the `Supervisor.run()` background task **died silently** → the job
+  was never finalized (never moved to DONE) even though the M4B was already written.
+  Short test books never crossed 64 KB, so tests always passed.
+
+### Fix 1 — supervisor stdout pump (`web/supervisor.py`)
+- Replaced `readline()` with bounded `read(8192)` in `_pump_once()` **and** the post-exit
+  drain loop. `JobProcess.feed()` already splits on `\n` internally, so arbitrary chunk
+  boundaries are safe and the 64 KB line limit no longer applies.
+
+### Fix 2 — final `.m4b` filename (`epub2tts_chatterbox.py`)
+- Added `_safe_filename()` and built the output name from the real book title:
+  `<Book Title> (<speaker>).m4b` (falls back to `book` when no title). Applied where the
+  final M4B is named in `make_m4b()`.
+
+### Remediation of the stuck production job (container `/data/jobs/...`)
+- Renamed `book (sample2).m4b` →
+  `The Death Mage Who Doesn't Want a Fourth Time Chapters 101 - 200 (sample2).m4b`.
+- Set `state.json`: `state=DONE`, `progress=None`, `error=None`,
+  `output={path, size:1606830780}`.
+
+### Deployment to dev container (root@192.168.0.3:2222)
+- `scp` both edited files → placed in **`/app`** (uvicorn cwd, loads `web/`) **and**
+  **`site-packages/epub2tts_chatterbox/`** (the CLI subprocess loads the module from
+  here — gotcha: the package is installed non-editable). Cleared `__pycache__` in both.
+- Restarted uvicorn (killed old PID 13, new PID 595988). `mark_orphans_failed()` was a
+  no-op (no job was TRANSCRIBING at restart time).
+- Verified: `GET /` → 200; `GET /api/jobs` → 200; the job now reports
+  `DONE | The Death Mage Who Doesn't Want a Fourth Time Chapters 101 - 200 (sample2).m4b`.
+
+### Validation
+- `python3 -m py_compile` on both edited files: OK.
+- Container `/api/jobs` confirms the job is DONE with the correct titled filename.
+
+### Files changed (local repo)
+- `epub2tts_chatterbox/web/supervisor.py`
+- `epub2tts_chatterbox/epub2tts_chatterbox.py`
+- `agent/progress.md`, `agent/outline.md`
+
+### Next
+- [ ] Commit both fixes to `dev` (awaiting approval) — **not pushed**
+- [ ] Optional: add a `LimitOverrunError`/crash watchdog so a future supervisor death
+      marks the job FAILED instead of leaving it stuck in TRANSCRIBING
+- [ ] Optional: add a log-viewer in the UI to surface `stdout.log`
+
+---
+
 ## 2026-10-29 — User-facing README + production docker-compose.yml ✅
 
 ### Scope (testing phase: ship complete user docs)
